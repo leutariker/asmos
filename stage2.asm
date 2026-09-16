@@ -49,3 +49,5 @@ gdt:
 gdtr:
     dw gdtr - gdt - 1
     dd gdt
+
+include "include/elf32.inc"
