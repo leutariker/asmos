@@ -232,7 +232,7 @@ def main():
     )
 
     # drive number
-    bpb[36] = 0x00
+    bpb[36] = 0x80
 
     # bpb signature
     bpb[38] = 0x29
@@ -340,8 +340,6 @@ def main():
         len(stage3),
     )
 
-    output.write_bytes(image)
-
     stage2_lba = (
         DATA_START_SECTOR
         + (stage2_cluster - 2)
@@ -353,6 +351,15 @@ def main():
         + (stage3_cluster - 2)
         * SECTORS_PER_CLUSTER
     )
+
+    stage2_sectors = (
+        len(stage2) + SECTOR_SIZE - 1
+    ) // SECTOR_SIZE
+
+    struct.pack_into("<H", image, 0x40, stage2_sectors)
+    struct.pack_into("<Q", image, 0x46, stage2_lba)
+
+    output.write_bytes(image)
 
     print("Created:", output)
     print()
