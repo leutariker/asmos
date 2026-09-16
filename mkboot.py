@@ -1,0 +1,388 @@
+#!/usr/bin/env python3
+
+import struct
+import sys
+from pathlib import Path
+
+# 1.44mb floppy:
+#   1 reserved sector
+#   9 sectors fat #1
+#   9 sectors fat #2
+#   14 sectors root directory
+#   2847 data sectors
+
+IMAGE_SIZE = 1474560
+SECTOR_SIZE = 512
+TOTAL_SECTORS = IMAGE_SIZE // SECTOR_SIZE
+RESERVED_SECTORS = 1
+NUM_FATS = 2
+ROOT_ENTRIES = 224
+SECTORS_PER_CLUSTER = 1
+FAT_SIZE = 9
+ROOT_DIR_SECTORS = (
+    ROOT_ENTRIES * 32 + SECTOR_SIZE - 1
+) // SECTOR_SIZE
+DATA_START_SECTOR = (
+    RESERVED_SECTORS
+    + NUM_FATS * FAT_SIZE
+    + ROOT_DIR_SECTORS
+)
+
+def write_sector(image, lba, data):
+    if len(data) > SECTOR_SIZE:
+        raise ValueError("data is larger than one sector")
+
+    offset = lba * SECTOR_SIZE
+    image[offset:offset + len(data)] = data
+
+
+# make a fat16 8.3 filename from a normal filename
+def fatify_name(name):
+    name = name.upper()
+
+    if "." in name:
+        base, ext = name.split(".", 1)
+    else:
+        base = name
+        ext = ""
+
+    base = base[:8].ljust(8)
+    ext = ext[:3].ljust(3)
+
+    return (base + ext).encode("ascii")
+
+def write_fat_entry(image, fat_start, cluster, value):
+    offset = fat_start * SECTOR_SIZE + cluster * 2
+    struct.pack_into("<H", image, offset, value)
+
+def allocate_clusters(image, fat_start, data, start_cluster):
+    cluster_size = SECTOR_SIZE * SECTORS_PER_CLUSTER
+    cluster_count = (
+        len(data) + cluster_size - 1
+    ) // cluster_size
+
+    if cluster_count == 0:
+        cluster_count = 1
+
+    first_cluster = start_cluster
+
+    for i in range(cluster_count):
+        cluster = start_cluster + i
+
+        data_start = i * cluster_size
+        data_end = min(data_start + cluster_size, len(data))
+
+        chunk = data[data_start:data_end]
+
+        # first data cluster
+        lba = DATA_START_SECTOR + (
+            cluster - 2
+        ) * SECTORS_PER_CLUSTER
+
+        write_sector(image, lba, chunk)
+
+        # chain to the next cluster
+        if i == cluster_count - 1:
+            next_cluster = 0xFFFF
+        else:
+            next_cluster = cluster + 1
+
+        write_fat_entry(
+            image,
+            fat_start,
+            cluster,
+            next_cluster,
+        )
+
+    return first_cluster, cluster_count
+
+
+# create a root directory entry for a file
+def add_root_entry(
+    image,
+    index,
+    filename,
+    first_cluster,
+    file_size,
+):
+    root_start = (
+        RESERVED_SECTORS
+        + NUM_FATS * FAT_SIZE
+    )
+
+    offset = (
+        root_start * SECTOR_SIZE
+        + index * 32
+    )
+
+    entry = bytearray(32)
+    entry[0:11] = fatify_name(filename)
+    entry[11] = 0x20 # attr: archive
+
+    # first cluster
+    struct.pack_into(
+        "<H",
+        entry,
+        26,
+        first_cluster,
+    )
+
+    # file size
+    struct.pack_into(
+        "<I",
+        entry,
+        28,
+        file_size,
+    )
+
+    image[offset:offset + 32] = entry
+
+def main():
+    if len(sys.argv) != 5:
+        print(
+            f"usage: {sys.argv[0]} "
+            "stage1.out stage2.out stage3.out output.img"
+        )
+        sys.exit(1)
+
+    stage1_path = Path(sys.argv[1])
+    stage2_path = Path(sys.argv[2])
+    stage3_path = Path(sys.argv[3])
+    output = Path(sys.argv[4])
+
+    stage1 = stage1_path.read_bytes()
+    stage2 = stage2_path.read_bytes()
+    stage3 = stage3_path.read_bytes()
+
+    if len(stage1) != 512:
+        raise ValueError(
+            f"stage1 must be exactly 512 bytes "
+            f"(got {len(stage1)})"
+        )
+
+    image = bytearray(IMAGE_SIZE)
+    bpb = bytearray(stage1)
+
+    # bytes per sector
+    struct.pack_into("<H", bpb, 11, SECTOR_SIZE)
+
+    # sectors per cluster
+    bpb[13] = SECTORS_PER_CLUSTER
+
+    # number of reserved sectors
+    struct.pack_into(
+        "<H",
+        bpb,
+        14,
+        RESERVED_SECTORS,
+    )
+
+    # number of FATs
+    bpb[16] = NUM_FATS
+
+    # root directory entries
+    struct.pack_into(
+        "<H",
+        bpb,
+        17,
+        ROOT_ENTRIES,
+    )
+
+    # total sectors (16-bit field)
+    struct.pack_into(
+        "<H",
+        bpb,
+        19,
+        TOTAL_SECTORS,
+    )
+
+    # media descriptor: 0xf0 = floppy
+    bpb[21] = 0xf0
+
+    # Sectors per fat
+    struct.pack_into(
+        "<H",
+        bpb,
+        22,
+        FAT_SIZE,
+    )
+
+    # sectors per track
+    struct.pack_into(
+        "<H",
+        bpb,
+        24,
+        18,
+    )
+
+    # number of heads
+    struct.pack_into(
+        "<H",
+        bpb,
+        26,
+        2,
+    )
+
+    # number of hidden sectors
+    struct.pack_into(
+        "<I",
+        bpb,
+        28,
+        0,
+    )
+
+    # drive number
+    bpb[36] = 0x00
+
+    # bpb signature
+    bpb[38] = 0x29
+
+    # volume ID
+    struct.pack_into(
+        "<I",
+        bpb,
+        39,
+        0x12345678,
+    )
+
+    # volume label
+    bpb[43:54] = b"asmos".ljust(11)
+
+    # filesystem type
+    bpb[54:62] = b"FAT16".ljust(8)
+
+    # bpb signature
+    bpb[510] = 0x55
+    bpb[511] = 0xaa
+
+    write_sector(image, 0, bpb)
+
+    fat1_start = RESERVED_SECTORS
+    fat2_start = (
+        RESERVED_SECTORS + FAT_SIZE
+    )
+
+    # fat[0]
+    write_fat_entry(
+        image,
+        fat1_start,
+        0,
+        0xFFF8,
+    )
+
+    # fat[1]
+    write_fat_entry(
+        image,
+        fat1_start,
+        1,
+        0xFFFF,
+    )
+
+    # copy initial fat entries to fat #2
+    write_fat_entry(
+        image,
+        fat2_start,
+        0,
+        0xFFF8,
+    )
+
+    write_fat_entry(
+        image,
+        fat2_start,
+        1,
+        0xFFFF,
+    )
+
+    # add stage2
+    stage2_cluster, stage2_clusters = allocate_clusters(
+        image,
+        fat1_start,
+        stage2,
+        2,
+    )
+
+    # add stage3 to just after stage2
+    stage3_start_cluster = (
+        stage2_cluster + stage2_clusters
+    )
+
+    stage3_cluster, stage3_clusters = allocate_clusters(
+        image,
+        fat1_start,
+        stage3,
+        stage3_start_cluster,
+    )
+
+    # copy fat #1 to fat #2
+    fat1_offset = fat1_start * SECTOR_SIZE
+    fat2_offset = fat2_start * SECTOR_SIZE
+
+    image[
+        fat2_offset:fat2_offset + FAT_SIZE * SECTOR_SIZE
+    ] = image[
+        fat1_offset:fat1_offset + FAT_SIZE * SECTOR_SIZE
+    ]
+
+    # create root dir
+    add_root_entry(
+        image,
+        0,
+        "STAGE2.BIN",
+        stage2_cluster,
+        len(stage2),
+    )
+
+    add_root_entry(
+        image,
+        1,
+        "STAGE3.ELF",
+        stage3_cluster,
+        len(stage3),
+    )
+
+    output.write_bytes(image)
+
+    stage2_lba = (
+        DATA_START_SECTOR
+        + (stage2_cluster - 2)
+        * SECTORS_PER_CLUSTER
+    )
+
+    stage3_lba = (
+        DATA_START_SECTOR
+        + (stage3_cluster - 2)
+        * SECTORS_PER_CLUSTER
+    )
+
+    print("Created:", output)
+    print()
+    print("FAT16 layout:")
+    print(f"\tFAT #1: LBA {fat1_start}")
+    print(f"\tFAT #2: LBA {fat2_start}")
+    print(
+        f"\tRoot dir: LBA "
+        f"{fat1_start + NUM_FATS * FAT_SIZE}"
+    )
+    print(
+        f"\tData: LBA {DATA_START_SECTOR}"
+    )
+    print()
+    print("Files:")
+    print(
+        f"\tSTAGE2.BIN: "
+        f"cluster {stage2_cluster}, "
+        f"LBA {stage2_lba}, "
+        f"{len(stage2)} bytes, "
+        f"{stage2_clusters} clusters"
+    )
+    print(
+        f"\tSTAGE3.ELF: "
+        f"cluster {stage3_cluster}, "
+        f"LBA {stage3_lba}, "
+        f"{len(stage3)} bytes, "
+        f"{stage3_clusters} clusters"
+    )
+
+
+if __name__ == "__main__":
+    main()
