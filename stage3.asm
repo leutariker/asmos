@@ -1,6 +1,7 @@
-format binary
+format ELF executable 3 at 0x10000
 use32
-org 0x10000
+entry start
+segment readable executable
 
 start:
     cli

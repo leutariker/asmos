@@ -39,7 +39,11 @@ main:
     call fat16_read_file
     jc reboot
 
-    jmp 0x10000
+    mov eax, 0x10000
+    call elf32_load_file
+    jc reboot
+
+    jmp eax
 
 @@: hlt
     jmp @b
