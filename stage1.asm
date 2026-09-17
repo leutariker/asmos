@@ -56,6 +56,7 @@ start:
     jc reboot
 
     jmp 0x8000
+    jmp reboot
 
 has_edd?:
 

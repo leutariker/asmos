@@ -44,9 +44,7 @@ main:
     jc reboot
 
     jmp eax
-
-@@: hlt
-    jmp @b
+    jmp reboot
 
 gdt:
     dq 0x0000000000000000

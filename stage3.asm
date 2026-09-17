@@ -1,22 +1,26 @@
 format ELF executable 3 at 0x10000
 use32
 entry start
-segment readable executable
+segment readable executable writable
+include "include/pic.inc"
 
 start:
-    cli
-    lidt [idtr]
-
     mov al, 0xFF
     out PIC1, al
     out PIC2, al
 
+    lidt [idtr]
     sti
 
     mov edi, 0xB8000
-    mov ax, 0x0720
+    mov ax, 0x1620
     mov ecx, 80 * 25
     rep stosw
+
+    mov al, "O"
+    out 0xE9, al
+    mov al, "K"
+    out 0xE9, al
 
 @@: hlt
     jmp @b
@@ -32,9 +36,6 @@ idt_stubs:
         align 8
     }
 
-include "include/pic.inc"
-
-segment readable writable
 idt:
     rept 256 n:0 {
         dw ((idt_stubs + (16 * n)) and 0xFFFF) ; isr low
