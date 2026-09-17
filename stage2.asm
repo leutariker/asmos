@@ -34,10 +34,16 @@ main:
     mov gs, ax
     mov fs, ax
 
+    mov edi, 0x10000
+    mov ax, 3
+    call fat16_read_cluster
+
     mov edi, 0xB8000
     mov ax, 0x0720
     mov ecx, 80 * 25
     rep stosw
+
+    jmp 0x10000
 
 @@: hlt
     jmp @b
@@ -50,4 +56,6 @@ gdtr:
     dw gdtr - gdt - 1
     dd gdt
 
+include "include/ata.inc"
+include "include/fat16.inc"
 include "include/elf32.inc"
