@@ -1,9 +1,11 @@
+INCLUDE=$(wildcard include/*.inc)
+
 all: boot.img
 
 boot.img: mkboot.py stage1.out stage2.out stage3.out
 	python3 $^ $@
 
-%.out: %.asm
+%.out: %.asm $(INCLUDE)
 	fasm $< $@
 
 run: boot.img

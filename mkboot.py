@@ -327,7 +327,7 @@ def main():
     add_root_entry(
         image,
         0,
-        "STAGE2.BIN",
+        "STAGE2.OUT",
         stage2_cluster,
         len(stage2),
     )
@@ -335,7 +335,7 @@ def main():
     add_root_entry(
         image,
         1,
-        "STAGE3.ELF",
+        "STAGE3.OUT",
         stage3_cluster,
         len(stage3),
     )
@@ -376,14 +376,14 @@ def main():
     print()
     print("Files:")
     print(
-        f"\tSTAGE2.BIN: "
+        f"\tSTAGE2.OUT: "
         f"cluster {stage2_cluster}, "
         f"LBA {stage2_lba}, "
         f"{len(stage2)} bytes, "
         f"{stage2_clusters} clusters"
     )
     print(
-        f"\tSTAGE3.ELF: "
+        f"\tSTAGE3.OUT: "
         f"cluster {stage3_cluster}, "
         f"LBA {stage3_lba}, "
         f"{len(stage3)} bytes, "

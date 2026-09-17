@@ -2,10 +2,10 @@ format binary
 org 0x7C00
 use16
 
-jmp short start
-nop
-
 bpb:
+    .entry:
+        jmp short start
+        nop
     .oem_id: times 8 db 0
     .bytes_per_sector: dw 0
     .sectors_per_cluster: db 0
@@ -78,14 +78,7 @@ has_edd?:
         stc
         ret
 
-reboot:
-    cli
-@@: in al, 0x64
-    test al, 0x02
-    jnz @b
-    mov al, 0xFE
-    out 0x64, al
-    hlt
+include "include/reboot.inc"
 
 times (510 - ($ - $$)) db 0
 dw 0xAA55
