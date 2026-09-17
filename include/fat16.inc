@@ -1,4 +1,5 @@
 FAT16_BPB = 0x7C00
+FAT16_SCRATCH = 0x7A00
 
 FAT16_BPB_ENTRY = 0
 FAT16_BPB_OEM_ID = FAT16_BPB_ENTRY + 3
@@ -76,6 +77,68 @@ fat16_get_data_start:
     pop bx
     ret
 
+fat16_find_file:
+
+; in:
+;   - esi: pointer to 11-byte filename
+; out:
+;   - ax: first cluster of the file
+;   - cf: set if file was not found
+
+    push ebx
+    push ecx
+    push edx
+    push edi
+
+    call fat16_get_root_dir_start
+    movzx ebx, ax
+
+    movzx edx, word [FAT16_BPB + FAT16_BPB_ROOT_ENTRIES] ; edx = entries left to check
+    .next_sector:
+        mov eax, ebx
+        mov edi, FAT16_SCRATCH
+        mov cl, 1
+        call ata_read
+        inc ebx
+
+    .next_entry:
+        cmp byte [edi], 0
+        je .error ; no more entries in the directory
+
+        cmp byte [edi], 0xE5
+        je .skip ; deleted entry
+
+        push edi
+        push esi
+        mov ecx, 11
+        repe cmpsb
+        pop esi
+        pop edi
+        je .found
+
+    .skip:
+        add edi, 32
+        dec edx
+        jz .error ; ran out of entries
+        test edi, 0x1FF
+        jnz .next_entry
+        jmp .next_sector
+
+    .found:
+        movzx eax, word [edi + 26]
+        clc
+        jmp .exit
+
+    .error:
+        stc
+    
+    .exit:
+        pop edi
+        pop edx
+        pop ecx
+        pop ebx
+        ret
+
 fat16_get_next_cluster:
 
 ; in:
@@ -83,18 +146,32 @@ fat16_get_next_cluster:
 ; out:
 ;   - ax: next cluster number
 
-    push bx
+    push ebx
     push ecx
+    push edx
+    push edi
 
-    mov bx, ax
-    mov ax, [FAT16_BPB + FAT16_BPB_RESERVED_SECTORS]
-    movzx ecx, bx
-    shl ecx, 1
-    add cx, ax
-    mov ax, [ecx]
+    movzx ebx, ax
+    shl ebx, 1 ; ebx = byte offset of this cluster's entry within the fat table
 
+    movzx ecx, word [FAT16_BPB + FAT16_BPB_BYTES_PER_SECTOR]
+    mov eax, ebx
+    xor edx, edx
+    div ecx ; eax = sector offset within the fat table, edx = byte offset within that sector
+    mov ebx, edx ; ebx = byte offset within the sector
+
+    add ax, [FAT16_BPB + FAT16_BPB_RESERVED_SECTORS] ; ax = lba of the fat sector containing this entry
+
+    mov edi, FAT16_SCRATCH
+    mov cl, 1
+    call ata_read
+
+    movzx eax, word [FAT16_SCRATCH + ebx]
+
+    pop edi
+    pop edx
     pop ecx
-    pop bx
+    pop ebx
     ret
 
 fat16_read_cluster:
@@ -125,3 +202,36 @@ fat16_read_cluster:
     pop ecx
     pop eax
     ret
+
+fat16_read_file:
+
+; in:
+;   - esi: pointer to 11-byte filename
+;   - edi: pointer to buffer to read the file into
+; out:
+;   - cf: set if the file was not found
+
+    push eax
+    push ecx
+    push edx
+
+    call fat16_find_file
+    jc .exit
+
+    movzx ecx, word [FAT16_BPB + FAT16_BPB_BYTES_PER_SECTOR]
+    movzx edx, byte [FAT16_BPB + FAT16_BPB_SECTORS_PER_CLUSTER]
+    imul ecx, edx ; ecx = bytes per cluster
+
+@@: call fat16_read_cluster
+    add edi, ecx
+    call fat16_get_next_cluster
+    cmp ax, 0xFFF8 ; end of cluster
+    jb @b
+
+    clc
+
+    .exit:
+        pop edx
+        pop ecx
+        pop eax
+        ret

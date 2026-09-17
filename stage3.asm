@@ -5,8 +5,10 @@ org 0x10000
 start:
     cli
 
-    mov al, 'X'
-    out 0xE9, al
+    mov edi, 0xB8000
+    mov ax, 0x0720
+    mov ecx, 80 * 25
+    rep stosw
 
 @@: hlt
     jmp @b
