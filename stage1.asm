@@ -56,7 +56,15 @@ start:
     jc reboot
 
     jmp 0x8000
-    jmp reboot
+
+reboot:
+    cli
+@@: in al, 0x64
+    test al, 0x02
+    jnz @b
+    mov al, 0xFE
+    out 0x64, al
+    hlt
 
 has_edd?:
 
@@ -78,8 +86,6 @@ has_edd?:
     .error:
         stc
         ret
-
-include "include/reboot.inc"
 
 times (510 - ($ - $$)) db 0
 dw 0xAA55

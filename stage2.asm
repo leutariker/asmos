@@ -46,6 +46,15 @@ main:
     jmp eax
     jmp reboot
 
+reboot:
+    cli
+@@: in al, 0x64
+    test al, 0x02
+    jnz @b
+    mov al, 0xFE
+    out 0x64, al
+    hlt
+
 gdt:
     dq 0x0000000000000000
     dq 0x00CF92000000FFFF
@@ -56,7 +65,6 @@ gdtr:
 
 STAGE3_FILENAME db "STAGE3  OUT"
 
-include "include/reboot.inc"
 include "include/ata.inc"
 include "include/fat16.inc"
 include "include/elf32.inc"
