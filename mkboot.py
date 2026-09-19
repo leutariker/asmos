@@ -35,7 +35,6 @@ def write_sector(image, lba, data):
     offset = lba * SECTOR_SIZE
     image[offset:offset + len(data)] = data
 
-
 # make a fat16 8.3 filename from a normal filename
 def fatify_name(name):
     name = name.upper()
@@ -54,6 +53,7 @@ def fatify_name(name):
 def write_fat_entry(image, fat_start, cluster, value):
     offset = fat_start * SECTOR_SIZE + cluster * 2
     struct.pack_into("<H", image, offset, value)
+
 
 def allocate_clusters(image, fat_start, data, start_cluster):
     cluster_size = SECTOR_SIZE * SECTORS_PER_CLUSTER
@@ -96,15 +96,8 @@ def allocate_clusters(image, fat_start, data, start_cluster):
 
     return first_cluster, cluster_count
 
-
 # create a root directory entry for a file
-def add_root_entry(
-    image,
-    index,
-    filename,
-    first_cluster,
-    file_size,
-):
+def add_root_entry(image, index, filename, first_cluster, file_size):
     root_start = (
         RESERVED_SECTORS
         + NUM_FATS * FAT_SIZE
@@ -137,31 +130,31 @@ def add_root_entry(
 
     image[offset:offset + 32] = entry
 
+
 def main():
-    if len(sys.argv) != 5:
+    if len(sys.argv) < 4:
         print(
             f"usage: {sys.argv[0]} "
-            "stage1.out stage2.out stage3.out output.img"
+            "bootsector.bin file1.bin [file2.bin ...] output.img"
         )
         sys.exit(1)
 
-    stage1_path = Path(sys.argv[1])
-    stage2_path = Path(sys.argv[2])
-    stage3_path = Path(sys.argv[3])
-    output = Path(sys.argv[4])
+    bootsector_path = Path(sys.argv[1])
+    output_path = Path(sys.argv[-1])
 
-    stage1 = stage1_path.read_bytes()
-    stage2 = stage2_path.read_bytes()
-    stage3 = stage3_path.read_bytes()
+    # grab everything between the first and last arguments
+    payload_paths = [Path(p) for p in sys.argv[2:-1]]
 
-    if len(stage1) != 512:
+    bootsector = bootsector_path.read_bytes()
+
+    if len(bootsector) != 512:
         raise ValueError(
-            f"stage1 must be exactly 512 bytes "
-            f"(got {len(stage1)})"
+            f"bootsector must be exactly 512 bytes "
+            f"(got {len(bootsector)})"
         )
 
     image = bytearray(IMAGE_SIZE)
-    bpb = bytearray(stage1)
+    bpb = bytearray(bootsector)
 
     # bytes per sector
     struct.pack_into("<H", bpb, 11, SECTOR_SIZE)
@@ -199,7 +192,7 @@ def main():
     # media descriptor: 0xf0 = floppy
     bpb[21] = 0xf0
 
-    # Sectors per fat
+    # sectors per fat
     struct.pack_into(
         "<H",
         bpb,
@@ -293,25 +286,46 @@ def main():
         0xFFFF,
     )
 
-    # add stage2
-    stage2_cluster, stage2_clusters = allocate_clusters(
-        image,
-        fat1_start,
-        stage2,
-        2,
-    )
+    current_cluster = 2
+    files = []
 
-    # add stage3 to just after stage2
-    stage3_start_cluster = (
-        stage2_cluster + stage2_clusters
-    )
+    # add all payload files to the image
+    for idx, path in enumerate(payload_paths):
+        data = path.read_bytes()
+        filename = path.name
 
-    stage3_cluster, stage3_clusters = allocate_clusters(
-        image,
-        fat1_start,
-        stage3,
-        stage3_start_cluster,
-    )
+        start_cluster, num_clusters = allocate_clusters(
+            image,
+            fat1_start,
+            data,
+            current_cluster,
+        )
+
+        add_root_entry(
+            image,
+            idx,
+            filename,
+            start_cluster,
+            len(data),
+        )
+
+        lba = (
+            DATA_START_SECTOR
+            + (start_cluster - 2)
+            * SECTORS_PER_CLUSTER
+        )
+        sectors = (len(data) + SECTOR_SIZE - 1) // SECTOR_SIZE
+
+        files.append({
+            "name": filename,
+            "cluster": start_cluster,
+            "clusters": num_clusters,
+            "lba": lba,
+            "bytes": len(data),
+            "sectors": sectors
+        })
+
+        current_cluster += num_clusters
 
     # copy fat #1 to fat #2
     fat1_offset = fat1_start * SECTOR_SIZE
@@ -323,45 +337,15 @@ def main():
         fat1_offset:fat1_offset + FAT_SIZE * SECTOR_SIZE
     ]
 
-    # create root dir
-    add_root_entry(
-        image,
-        0,
-        "STAGE2.OUT",
-        stage2_cluster,
-        len(stage2),
-    )
+    # patch the bootsector with information from the first file
+    if files:
+        first_file = files[0]
+        struct.pack_into("<H", image, 0x40, first_file["sectors"])
+        struct.pack_into("<Q", image, 0x46, first_file["lba"])
 
-    add_root_entry(
-        image,
-        1,
-        "STAGE3.OUT",
-        stage3_cluster,
-        len(stage3),
-    )
+    output_path.write_bytes(image)
 
-    stage2_lba = (
-        DATA_START_SECTOR
-        + (stage2_cluster - 2)
-        * SECTORS_PER_CLUSTER
-    )
-
-    stage3_lba = (
-        DATA_START_SECTOR
-        + (stage3_cluster - 2)
-        * SECTORS_PER_CLUSTER
-    )
-
-    stage2_sectors = (
-        len(stage2) + SECTOR_SIZE - 1
-    ) // SECTOR_SIZE
-
-    struct.pack_into("<H", image, 0x40, stage2_sectors)
-    struct.pack_into("<Q", image, 0x46, stage2_lba)
-
-    output.write_bytes(image)
-
-    print("Created:", output)
+    print("Created:", output_path)
     print()
     print("FAT16 layout:")
     print(f"\tFAT #1: LBA {fat1_start}")
@@ -370,25 +354,18 @@ def main():
         f"\tRoot dir: LBA "
         f"{fat1_start + NUM_FATS * FAT_SIZE}"
     )
-    print(
-        f"\tData: LBA {DATA_START_SECTOR}"
-    )
+    print(f"\tData: LBA {DATA_START_SECTOR}")
     print()
     print("Files:")
-    print(
-        f"\tSTAGE2.OUT: "
-        f"cluster {stage2_cluster}, "
-        f"LBA {stage2_lba}, "
-        f"{len(stage2)} bytes, "
-        f"{stage2_clusters} clusters"
-    )
-    print(
-        f"\tSTAGE3.OUT: "
-        f"cluster {stage3_cluster}, "
-        f"LBA {stage3_lba}, "
-        f"{len(stage3)} bytes, "
-        f"{stage3_clusters} clusters"
-    )
+    
+    for info in files:
+        print(
+            f"\t{info['name']}: "
+            f"cluster {info['cluster']}, "
+            f"LBA {info['lba']}, "
+            f"{info['bytes']} bytes, "
+            f"{info['clusters']} clusters"
+        )
 
 
 if __name__ == "__main__":

@@ -34,7 +34,7 @@ main:
     mov gs, ax
     mov fs, ax
 
-    mov esi, STAGE3_FILENAME
+    mov esi, stage3
     mov edi, 0x10000
     call fat16_read_file
     jc reboot
@@ -63,7 +63,7 @@ gdtr:
     dw gdtr - gdt - 1
     dd gdt
 
-STAGE3_FILENAME db "STAGE3  OUT"
+stage3 db "STAGE3  OUT"
 
 include "include/ata.inc"
 include "include/fat16.inc"

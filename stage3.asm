@@ -1,3 +1,10 @@
+macro mk8.3 name, ext {
+    local .start
+    .start: db name
+    times 8 - ($ - .start) db ' '
+    db ext
+}
+
 PIC1 = 0x20
 PIC2 = 0xA0
 PIC1_DATA = PIC1 + 1
@@ -91,9 +98,49 @@ start:
     ; load idt
     lidt [idtr]
 
+    mov esi, hello_out
+    call exec
+
     sti
 @@: hlt
     jmp @b
+
+exec:
+
+; in:
+;   - esi: file name to exec
+
+    mov edi, [.exec_ptr]
+    call fat16_read_file
+    jc .error
+    push eax
+
+    mov eax, [.exec_ptr]
+    call elf32_load_file
+    jc .error
+
+    call eax
+
+    pop eax
+    add [.exec_ptr], eax
+
+    clc
+    ret
+
+    .error:
+        stc
+        ret
+
+    .exec_ptr: dd 0x200000
+
+reboot:
+    cli
+@@: in al, 0x64
+    test al, 0x02
+    jnz @b
+    mov al, 0xFE
+    out 0x64, al
+    hlt
 
 init_irq:
 
@@ -192,7 +239,13 @@ rept 256 n:0 {
         times 16-($ - .stub#n) db 0
 }
 
+include "include/ata.inc"
+include "include/elf32.inc"
+include "include/fat16.inc"
+
 segment readable
+hello_out: mk8.3 "HELLO", "OUT"
+
 idt:
     rept 256 n:0 {
         dw ((idt_stubs + (16 * n)) and 0xFFFF) ; isr low

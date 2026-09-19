@@ -83,6 +83,7 @@ fat16_find_file:
 ;   - esi: pointer to 11-byte filename
 ; out:
 ;   - ax: first cluster of the file
+;   - ebx: file size in bytes
 ;   - cf: set if file was not found
 
     push ebx
@@ -125,7 +126,9 @@ fat16_find_file:
         jmp .next_sector
 
     .found:
-        movzx eax, word [edi + 26]
+        movzx eax, word [edi + 26] ; get first cluster
+        mov ebx, dword [edi + 28]  ; get 32-bit file size
+        mov [esp + 12], ebx ; overwrite the saved ebx on the stack so it pops cleanly
         clc
         jmp .exit
 
@@ -209,14 +212,20 @@ fat16_read_file:
 ;   - esi: pointer to 11-byte filename
 ;   - edi: pointer to buffer to read the file into
 ; out:
+;   - eax: size of the file in bytes
 ;   - cf: set if the file was not found
 
+    push ebx
     push eax
     push ecx
     push edx
 
     call fat16_find_file
     jc .exit
+
+    ; fat16_find_file returned the size in ebx
+    ; overwrite the pushed eax so it gets popped to the caller on exit
+    mov [esp + 8], ebx 
 
     movzx ecx, word [FAT16_BPB + FAT16_BPB_BYTES_PER_SECTOR]
     movzx edx, byte [FAT16_BPB + FAT16_BPB_SECTORS_PER_CLUSTER]
@@ -234,4 +243,5 @@ fat16_read_file:
         pop edx
         pop ecx
         pop eax
+        pop ebx
         ret
