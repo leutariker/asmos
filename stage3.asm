@@ -47,9 +47,23 @@ start:
     mov ebp, esp
 
     ; disable the 8259 pic
-    mov al, 0xFF
+    mov al, 0x11
     out PIC1, al
     out PIC2, al
+    mov al, 0x20
+    out PIC1_DATA, al
+    mov al, 0x28
+    out PIC2_DATA, al
+    mov al, 0x04
+    out PIC1_DATA, al
+    mov al, 0x02
+    out PIC2_DATA, al
+    mov al, 0x01
+    out PIC1_DATA, al
+    out PIC2_DATA, al
+    mov al, 0xFF
+    out PIC1_DATA, al
+    out PIC2_DATA, al
 
     ; enable apic
     mov ecx, APIC_IA32_BASE_MSR
@@ -74,10 +88,6 @@ start:
     mov dword [esi + APIC_REG_LVT_TIMER], 0x20 or (1 shl 17) ; periodic timer
     mov dword [esi + APIC_REG_TIMER_INIT], 0x1000000 ; initial count
 
-    ; enable interrupts
-    mov edx, 0
-    call init_irq ; timer
-
     ; load idt
     lidt [idtr]
 
@@ -96,7 +106,7 @@ init_irq:
     shr ebx, 24
     
     ; index = IOAPIC_REDTBL_BASE + (irq * 2)
-    lea ecx, [IOAPIC_REDTBL_BASE + edx*2]
+    lea ecx, [IOAPIC_REDTBL_BASE + (edx*2)]
 
     ; write low part (vector = irq + 32)
     lea eax, [edx + 32]
@@ -114,38 +124,32 @@ init_irq:
     ret
 
 exception_handler:
-    pop eax ; exception number
-    
-    ; check if this exception pushed an error code
-    mov ecx, 1
-    mov cl, al
-    shl ecx, cl
-    test ecx, 0x227D00 ; bitmask for exceptions 8,10,11,12,13,14,17,21
-    jnz .error
-    
+
+; in:
+;   - eax: vector number
+;   - ebx: error code (if eax is 8,10,11,12,13,14,17,21)
+
+    cmp eax, 31
+    jle .error
     cmp eax, 31
     jg .irq
 
     iret
 
-    .error:
-        cli
-        pop ebx ; pop error code
-
+    .error:    
         mov esi, error_messages
         mov ecx, eax
         shl ecx, 5 ; 32 bytes per message
         add esi, ecx
         call debug
-
-@@:     cli
-        hlt
+        cli
+@@:     hlt
         jmp @b
 
     .irq:
         ; send eoi to apic
-        mov eax, [lapic]
-        mov dword [eax + APIC_REG_EOI], 0
+        mov ecx, [lapic]
+        mov dword [ecx + APIC_REG_EOI], 0
         iret
 
 debug:
@@ -162,11 +166,31 @@ debug:
 @@: ret
 
 idt_stubs:
-    rept 256 n:0 {
-@@:     push n
+rept 256 n:0 {
+    .stub#n:
+        if n = 8
+            pop ebx
+        else if n = 10
+            pop ebx
+        else if n = 11
+            pop ebx
+        else if n = 12
+            pop ebx
+        else if n = 13
+            pop ebx
+        else if n = 14
+            pop ebx
+        else if n = 17
+            pop ebx
+        else if n = 21
+            pop ebx
+        end if
+
+        mov eax, n
+
         jmp exception_handler
-        times (16 - ($ - @b)) db 0
-    }
+        times 16-($ - .stub#n) db 0
+}
 
 segment readable
 idt:
@@ -174,7 +198,7 @@ idt:
         dw ((idt_stubs + (16 * n)) and 0xFFFF) ; isr low
         dw 0x10 ; cs
         db 0 ; reserved
-        db 0x86 ; attr
+        db 0x8E ; attr
         dw ((idt_stubs + (16 * n)) shr 16) ; isr high
     }
 idtr:
@@ -190,50 +214,55 @@ gdtr:
     dd gdt
 
 error_messages:
-    @@: db "Divide by zero", 0
+@@: db "Divide by zero", 0
     times 32-($ - @b) db 0
-    @@: db "Debug", 0
+@@: db "Debug", 0
     times 32-($ - @b) db 0
-    @@: db "Non-maskable interrupt", 0
+@@: db "Non-maskable interrupt", 0
     times 32-($ - @b) db 0
-    @@: db "Breakpoint", 0
+@@: db "Breakpoint", 0
     times 32-($ - @b) db 0
-    @@: db "Overflow", 0
+@@: db "Overflow", 0
     times 32-($ - @b) db 0
-    @@: db "Bound range exceeded", 0
+@@: db "Bound range exceeded", 0
     times 32-($ - @b) db 0
-    @@: db "Invalid opcode", 0
+@@: db "Invalid opcode", 0
     times 32-($ - @b) db 0
-    @@: db "Device not available", 0
+@@: db "Device not available", 0
     times 32-($ - @b) db 0
-    @@: db "Double fault", 0
+@@: db "Double fault", 0
     times 32-($ - @b) db 0
-    @@: db "Coprocessor segment overrun", 0
+@@: db "Coprocessor segment overrun", 0
     times 32-($ - @b) db 0
-    @@: db "Invalid TSS", 0
+@@: db "Invalid TSS", 0
     times 32-($ - @b) db 0
-    @@: db "Segment not present", 0
+@@: db "Segment not present", 0
     times 32-($ - @b) db 0
-    @@: db "Stack-segment fault", 0
+@@: db "Stack-segment fault", 0
     times 32-($ - @b) db 0
-    @@: db "General protection fault", 0
+@@: db "General protection fault", 0
     times 32-($ - @b) db 0
-    @@: db "Page fault", 0
+@@: db "Page fault", 0
     times 32-($ - @b) db 0
-    @@: db "Reserved", 0
+@@: db "Reserved", 0
     times 32-($ - @b) db 0
-    @@: db "x87 floating-point exception", 0
+@@: db "x87 floating-point exception", 0
     times 32-($ - @b) db 0
-    @@: db "Alignment check", 0
+@@: db "Alignment check", 0
     times 32-($ - @b) db 0
-    @@: db "Machine check", 0
+@@: db "Machine check", 0
     times 32-($ - @b) db 0
-    @@: db "SIMD floating-point exception", 0
+@@: db "SIMD floating-point exception", 0
+    times 32-($ - @b) db 0
+@@: db "Virtualization exception", 0
+    times 32-($ - @b) db 0
+@@: db "Control protection exception", 0
     times 32-($ - @b) db 0
 
 segment readable writable
 lapic: dd 0
 
+align 16
 stack_btm: 
 rb 16384
 stack_top:
