@@ -250,6 +250,7 @@ exception_handler:
         iret
     
     .error:    
+        popad
         mov esi, error_messages
         mov ecx, eax
         shl ecx, 5 ; 32 bytes per message
@@ -335,7 +336,7 @@ gdtr:
 irq_handlers:
     .timer: dd 0
     .keyboard: dd 0
-    times ((256*4)-($-irq_handlers)) dd 0
+    times 224 dd 0
 
 error_messages:
 @@: db "Divide by zero", 0
