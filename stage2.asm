@@ -10,13 +10,13 @@ start:
     mov ss, ax
     mov gs, ax
     mov fs, ax
-    mov bp, ax
+    xor bp, bp
     mov sp, 0x8000
 
     lgdt [gdtr]
 
     mov eax, cr0
-    or al, 1
+    or eax, 1
     mov cr0, eax
 
     jmp 0x10:main
@@ -45,7 +45,6 @@ main:
     jc reboot
 
     jmp eax
-    jmp reboot
 
 reboot:
     cli
@@ -66,6 +65,7 @@ gdtr:
 
 stage3 db "STAGE3  OUT"
 
+IS_X64=0
 include "include/ata.inc"
 include "include/fat16.inc"
 include "include/elf32.inc"

@@ -1,5 +1,5 @@
 format ELF executable 3 at 0x1000
-use32
+use64
 entry start
 segment readable executable writable
 
@@ -21,28 +21,28 @@ scan2ascii:
 ; out:
 ;   - al: ascii char
 
-    push ebx
+    push rbx
 
     call .get_pc
 .get_pc:
-    pop ebx
-    sub ebx, .get_pc
+    pop rbx
+    sub rbx, .get_pc
 
     ; check if scancode is 0xE0 (extended key prefix)
     cmp al, 0xE0
     jne @f
-    mov byte [.extended + ebx], 1
+    mov byte [.extended + rbx], 1
     jmp .no_char
 
     ; check if extended flag is set
-@@: cmp byte [.extended + ebx], 1
+@@: cmp byte [.extended + rbx], 1
     jne @f
-    mov byte [.extended + ebx], 0 ; reset extended flag
+    mov byte [.extended + rbx], 0 ; reset extended flag
     jmp .no_char
 
     ; check if break (bit 7)
 @@: test al, 0x80
-    jnz .handle_break 
+    jnz .handle_break
 
     cmp al, 0x2A ; left shift
     je .shift_down
@@ -54,23 +54,23 @@ scan2ascii:
 
     ; lookup char in map
     movzx eax, al
-    cmp byte [.shift + ebx], 1
+    cmp byte [.shift + rbx], 1
     je @f
 
     ; normal lookup
-    mov al, [scancodes + ebx + eax]
+    mov al, [scancodes + rbx + rax]
     jmp .exit
 
     ; shifted lookup
-@@: mov al, [scancodes.shift + ebx + eax]
+@@: mov al, [scancodes.shift + rbx + rax]
     jmp .exit
 
     .shift_down:
-        mov byte [.shift + ebx], 1
+        mov byte [.shift + rbx], 1
         jmp .no_char
 
     .shift_up:
-        mov byte [.shift + ebx], 0
+        mov byte [.shift + rbx], 0
         jmp .no_char
 
     .handle_break:
@@ -85,7 +85,7 @@ scan2ascii:
         xor al, al
 
     .exit:
-        pop ebx
+        pop rbx
         ret
 
     .shift: db 0

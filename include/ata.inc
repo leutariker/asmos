@@ -1,17 +1,27 @@
 ata_read:
 
 ; in:
-;   - eax: lba to read from
+;   - eax/rax: lba to read from
 ;   - cl: number of sectors to read
-;   - edi: pointer to buffer to read into
+;   - edi/rdi: pointer to buffer to read into
 
-    pushfd
-    and eax, 0x0FFFFFFF
-    push eax
-    push ebx
-    push ecx
-    push edx
-    push edi
+    if IS_X64
+        pushfq
+        and eax, 0x0FFFFFFF
+        push rax
+        push rbx
+        push rcx
+        push rdx
+        push rdi
+    else
+        pushfd
+        and eax, 0x0FFFFFFF
+        push eax
+        push ebx
+        push ecx
+        push edx
+        push edi
+    end if
 
     ; save lba
     mov ebx, eax
@@ -54,7 +64,7 @@ ata_read:
     test al, 8
     jz @b
 
-    ; read into edi
+    ; read into edi/rdi
     mov eax, 256 ; read 256 words (1 sector) at time
     xor bx, bx
     mov bl, cl ; read cl sectors total
@@ -63,10 +73,19 @@ ata_read:
     mov edx, 0x1F0
     rep insw
 
-    pop edi
-    pop edx
-    pop ecx
-    pop ebx
-    pop eax
-    popfd
+    if IS_X64
+        pop rdi
+        pop rdx
+        pop rcx
+        pop rbx
+        pop rax
+        popfq
+    else
+        pop edi
+        pop edx
+        pop ecx
+        pop ebx
+        pop eax
+        popfd
+    end if
     ret

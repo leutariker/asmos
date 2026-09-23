@@ -357,7 +357,7 @@ def main():
     print(f"\tData: LBA {DATA_START_SECTOR}")
     print()
     print("Files:")
-    
+
     for info in files:
         print(
             f"\t{info['name']}: "

@@ -30,20 +30,20 @@ BGA_BANK_SIZE_KB = 64
 BGA_BANK_ADDRESS = 0xA0000
 
 format ELF executable 3 at 0x1000
-use32
+use64
 entry start
 segment readable executable writable
 
 start:
 
 ; in:
-;   - eax: width
-;   - ebx: height
+;   - eax/rax: width
+;   - ebx/rbx: height
 ;   - cx:  bpp
 
-    push ecx
-    push ebx
-    push eax 
+    push rcx
+    push rbx
+    push rax
 
     ; check if bga is supported
     mov dx, BGA_IOPORT_INDEX
@@ -71,7 +71,7 @@ start:
     out dx, ax
 
     mov dx, BGA_IOPORT_DATA
-    pop eax ; pop width
+    pop rax ; pop width
     out dx, ax
 
     ; set height
@@ -80,7 +80,7 @@ start:
     out dx, ax
 
     mov dx, BGA_IOPORT_DATA
-    pop eax ; pop height
+    pop rax ; pop height
     out dx, ax
 
     ; set bpp
@@ -89,7 +89,7 @@ start:
     out dx, ax
 
     mov dx, BGA_IOPORT_DATA
-    pop eax ; pop bpp
+    pop rax ; pop bpp
     out dx, ax
 
     ; enable vbe extensions and lfb again
@@ -103,5 +103,5 @@ start:
 
     ret
 
-@@: add esp, 12
+@@: add rsp, 24
     ret

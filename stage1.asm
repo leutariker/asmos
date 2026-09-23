@@ -41,7 +41,7 @@ start:
     mov ss, ax
     mov gs, ax
     mov fs, ax
-    mov bp, ax
+    xor bp, bp
     mov sp, 0x7C00
 
     mov dl, [bpb.drive_number]
@@ -71,14 +71,14 @@ has_edd?:
 ; in:
 ;   - dl: disk number
 
-	mov ah, 0x41
-	mov bx, 0x55aa
-	int 0x13
-	jc .error
-	cmp bx, 0xaa55
-	jne .error
-	test cx, 1
-	jz .error
+    mov ah, 0x41
+    mov bx, 0x55aa
+    int 0x13
+    jc .error
+    cmp bx, 0xaa55
+    jne .error
+    test cx, 1
+    jz .error
 
     clc
     ret
