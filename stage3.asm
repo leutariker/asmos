@@ -95,6 +95,10 @@ start:
     mov dword [esi + APIC_REG_LVT_TIMER], 0x20 or (1 shl 17) ; periodic timer
     mov dword [esi + APIC_REG_TIMER_INIT], 0x1000000 ; initial count
 
+    ; init keyboard
+    mov edx, 1
+    call init_irq
+
     ; load idt
     lidt [idtr]
 
@@ -107,6 +111,11 @@ start:
     mov esi, initbga_out
     call load_prog
     mov [initbga], edx
+
+    ; load keyboard handler into memory
+    mov esi, keyhndlr_out
+    call load_prog
+    mov [irq_handlers.keyboard], edx
 
     ; init bga driver
     mov eax, 1024
@@ -175,10 +184,14 @@ init_irq:
 ; in:
 ;   - edx: irq number
 
+    push edx
+
     ; get apic id via cpuid into ebx
     mov eax, 1
     cpuid
     shr ebx, 24
+
+    pop edx
     
     ; index = IOAPIC_REDTBL_BASE + (irq * 2)
     lea ecx, [IOAPIC_REDTBL_BASE + (edx*2)]
@@ -222,6 +235,13 @@ exception_handler:
         jmp @b
 
     .irq:
+        sub eax, 32 ; convert vector to irq
+        mov eax, [irq_handlers + eax*4]
+        test eax, eax
+        jz @f
+        call eax
+        @@:
+    
         ; send eoi to apic
         mov ecx, [lapic]
         mov dword [ecx + APIC_REG_EOI], 0
@@ -277,6 +297,7 @@ include "include/fat16.inc"
 segment readable
 hello_out: mk8.3 "HELLO", "OUT"
 initbga_out: mk8.3 "INITBGA", "OUT"
+keyhndlr_out: mk8.3 "KEYHNDLR", "OUT"
 
 idt:
     rept 256 n:0 {
@@ -297,6 +318,11 @@ gdt:
 gdtr:
     dw $ - gdt - 1
     dd gdt
+
+irq_handlers:
+    .timer: dd 0
+    .keyboard: dd 0
+    times 224 dd 0
 
 error_messages:
 @@: db "Divide by zero", 0
