@@ -5,31 +5,6 @@ macro mk8.3 name, ext {
     db ext
 }
 
-PIC1 = 0x20
-PIC2 = 0xA0
-PIC1_DATA = PIC1 + 1
-PIC2_DATA = PIC2 + 1
-PIC_EOI = 0x20
-
-APIC_IA32_BASE_MSR = 0x1B
-APIC_IA32_BASE_MSR_ENABLE = 0x800
-APIC_REG_SIVR = 0xF0
-APIC_REG_EOI = 0xB0
-APIC_REG_ID = 0x20
-APIC_SIVR_ENABLE = 0x100
-APIC_SIVR_VECTOR = 0xFF
-APIC_REG_TIMER_DIV = 0x3E0
-APIC_REG_LVT_TIMER = 0x320
-APIC_REG_TIMER_INIT = 0x380
-APIC_REG_TIMER_CURR = 0x390
-APIC_REG_ICR_LOW = 0x300
-APIC_REG_ICR_HIGH = 0x310
-
-IOAPIC_REDTBL_BASE = 0x10
-IOAPIC_REG_BASE = 0xFEC00000
-IOAPIC_REG_INDEX = IOAPIC_REG_BASE
-IOAPIC_REG_DATA = IOAPIC_REG_BASE + 0x10
-
 format ELF executable 3 at 0x10000
 use32
 entry start
@@ -53,54 +28,17 @@ start:
     mov esp, stack_top
     mov ebp, esp
 
-    ; disable the 8259 pic
-    mov al, 0x11
-    out PIC1, al
-    out PIC2, al
-    mov al, 0x20
-    out PIC1_DATA, al
-    mov al, 0x28
-    out PIC2_DATA, al
-    mov al, 0x04
-    out PIC1_DATA, al
-    mov al, 0x02
-    out PIC2_DATA, al
-    mov al, 0x01
-    out PIC1_DATA, al
-    out PIC2_DATA, al
-    mov al, 0xFF
-    out PIC1_DATA, al
-    out PIC2_DATA, al
-
-    ; enable apic
-    mov ecx, APIC_IA32_BASE_MSR
-    rdmsr
-    or eax, APIC_IA32_BASE_MSR_ENABLE
-    wrmsr
-
-    ; store lapic base address
-    mov ecx, APIC_IA32_BASE_MSR
-    rdmsr
-    and eax, 0xFFFFF000
-    mov [lapic], eax
-    mov esi, eax
-
-    ; init lapic sivr
-    mov eax, [esi + APIC_REG_SIVR]
-    or eax, APIC_SIVR_ENABLE or APIC_SIVR_VECTOR
-    mov [esi + APIC_REG_SIVR], eax
-
-    ; init apic timer
-    mov dword [esi + APIC_REG_TIMER_DIV], 0x3 ; divide by 16
-    mov dword [esi + APIC_REG_LVT_TIMER], 0x20 or (1 shl 17) ; periodic timer
-    mov dword [esi + APIC_REG_TIMER_INIT], 0x1000000 ; initial count
-
-    ; init keyboard
-    mov edx, 1
-    call init_irq
-
     ; load idt
     lidt [idtr]
+
+    ; load apic code into memory
+    mov esi, initapic_out
+    call load_prog
+    mov [initapic], edx
+
+    ; init apic
+    lea eax, [lapic] ; pass ptr of apic base address
+    call dword [initapic]
 
     ; load hello world into memory
     mov esi, hello_out
@@ -189,38 +127,6 @@ reboot:
     out 0x64, al
     hlt
 
-init_irq:
-
-; in:
-;   - edx: irq number
-
-    push edx
-
-    ; get apic id via cpuid into ebx
-    mov eax, 1
-    cpuid
-    shr ebx, 24
-
-    pop edx
-    
-    ; index = IOAPIC_REDTBL_BASE + (irq * 2)
-    lea ecx, [IOAPIC_REDTBL_BASE + (edx*2)]
-
-    ; write low part (vector = irq + 32)
-    lea eax, [edx + 32]
-    and eax, 0xFF
-    mov dword [IOAPIC_REG_INDEX], ecx
-    mov dword [IOAPIC_REG_DATA], eax
-
-    ; write high part    
-    mov eax, ebx
-    shl eax, 24
-    inc ecx
-    mov dword [IOAPIC_REG_INDEX], ecx
-    mov dword [IOAPIC_REG_DATA], eax
-    
-    ret
-
 exception_handler:
 
 ; in:
@@ -245,7 +151,7 @@ exception_handler:
 
     .eoi:    
         mov ecx, [lapic]
-        mov dword [ecx + APIC_REG_EOI], 0
+        mov dword [ecx + 0xB0], 0
 @@:     popad
         iret
     
@@ -302,12 +208,14 @@ rept 256 n:0 {
 
 initbga: dd 0
 hello: dd 0
+initapic: dd 0
 
 include "include/ata.inc"
 include "include/elf32.inc"
 include "include/fat16.inc"
 
 segment readable
+initapic_out: mk8.3 "INITAPIC", "OUT"
 hello_out: mk8.3 "HELLO", "OUT"
 initbga_out: mk8.3 "INITBGA", "OUT"
 keyhndlr_out: mk8.3 "KEYHNDLR", "OUT"
