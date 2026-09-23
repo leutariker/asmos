@@ -1,80 +1,80 @@
-ELF32_TYPE_NONE = 0
-ELF32_TYPE_REL = 1
-ELF32_TYPE_EXEC = 2
+ELF64_TYPE_NONE = 0
+ELF64_TYPE_REL = 1
+ELF64_TYPE_EXEC = 2
 
-ELF32_SHT_TYPE_NULL = 0
-ELF32_SHT_TYPE_PROGBITS = 1
-ELF32_SHT_TYPE_SYMTAB = 2
-ELF32_SHT_TYPE_STRTAB = 3
-ELF32_SHT_TYPE_RELA = 4
-ELF32_SHT_TYPE_NOBITS = 8
-ELF32_SHT_TYPE_REL = 9
+ELF64_SHT_TYPE_NULL = 0
+ELF64_SHT_TYPE_PROGBITS = 1
+ELF64_SHT_TYPE_SYMTAB = 2
+ELF64_SHT_TYPE_STRTAB = 3
+ELF64_SHT_TYPE_RELA = 4
+ELF64_SHT_TYPE_NOBITS = 8
+ELF64_SHT_TYPE_REL = 9
 
-ELF32_SHT_ATTR_WRITE = 0
-ELF32_SHT_ATTR_ALLOC = 1
+ELF64_SHT_ATTR_WRITE = 0
+ELF64_SHT_ATTR_ALLOC = 1
 
-ELF32_RTTYPE_NONE = 0
-ELF32_RTTYPE_32 = 1
-ELF32_RTTYPE_PC32 = 2
+ELF64_RTTYPE_NONE = 0
+ELF64_RTTYPE_64 = 1
+ELF64_RTTYPE_PC32 = 2
 
-ELF32_PHTYPE_NULL = 0
-ELF32_PHTYPE_LOAD = 1
+ELF64_PHTYPE_NULL = 0
+ELF64_PHTYPE_LOAD = 1
 
-ELF32_HEADER_IDENT = 0
-ELF32_HEADER_TYPE = ELF32_HEADER_IDENT + 16
-ELF32_HEADER_MACHINE = ELF32_HEADER_TYPE + 2
-ELF32_HEADER_VERSION = ELF32_HEADER_MACHINE + 2
-ELF32_HEADER_ENTRY = ELF32_HEADER_VERSION + 4
-ELF32_HEADER_PHOFF = ELF32_HEADER_ENTRY + 4
-ELF32_HEADER_SHOFF = ELF32_HEADER_PHOFF + 4
-ELF32_HEADER_FLAGS = ELF32_HEADER_SHOFF + 4
-ELF32_HEADER_EHSIZE = ELF32_HEADER_FLAGS + 4
-ELF32_HEADER_PHENTSIZE = ELF32_HEADER_EHSIZE + 2
-ELF32_HEADER_PHNUM = ELF32_HEADER_PHENTSIZE + 2
-ELF32_HEADER_SHENTSIZE = ELF32_HEADER_PHNUM + 2
-ELF32_HEADER_SHNUM = ELF32_HEADER_SHENTSIZE + 2
-ELF32_HEADER_SHSTRNDX = ELF32_HEADER_SHNUM + 2
+ELF64_HEADER_IDENT = 0
+ELF64_HEADER_TYPE = ELF64_HEADER_IDENT + 16
+ELF64_HEADER_MACHINE = ELF64_HEADER_TYPE + 2
+ELF64_HEADER_VERSION = ELF64_HEADER_MACHINE + 2
+ELF64_HEADER_ENTRY = ELF64_HEADER_VERSION + 4
+ELF64_HEADER_PHOFF = ELF64_HEADER_ENTRY + 8
+ELF64_HEADER_SHOFF = ELF64_HEADER_PHOFF + 8
+ELF64_HEADER_FLAGS = ELF64_HEADER_SHOFF + 8
+ELF64_HEADER_EHSIZE = ELF64_HEADER_FLAGS + 4
+ELF64_HEADER_PHENTSIZE = ELF64_HEADER_EHSIZE + 2
+ELF64_HEADER_PHNUM = ELF64_HEADER_PHENTSIZE + 2
+ELF64_HEADER_SHENTSIZE = ELF64_HEADER_PHNUM + 2
+ELF64_HEADER_SHNUM = ELF64_HEADER_SHENTSIZE + 2
+ELF64_HEADER_SHSTRNDX = ELF64_HEADER_SHNUM + 2
 
-ELF32_HEADER_IDENT_MAGIC = 0
-ELF32_HEADER_IDENT_CLASS = 4
-ELF32_HEADER_IDENT_DATA = 5
-ELF32_HEADER_IDENT_VERSION = 6
-ELF32_HEADER_IDENT_OSABI = 7
-ELF32_HEADER_IDENT_ABIVERSION = 8
-ELF32_HEADER_IDENT_PAD = 9
+ELF64_HEADER_IDENT_MAGIC = 0
+ELF64_HEADER_IDENT_CLASS = 4
+ELF64_HEADER_IDENT_DATA = 5
+ELF64_HEADER_IDENT_VERSION = 6
+ELF64_HEADER_IDENT_OSABI = 7
+ELF64_HEADER_IDENT_ABIVERSION = 8
+ELF64_HEADER_IDENT_PAD = 9
 
-ELF32_SHDR_NAME = 0
-ELF32_SHDR_TYPE = ELF32_SHDR_NAME + 4
-ELF32_SHDR_FLAGS = ELF32_SHDR_TYPE + 4
-ELF32_SHDR_ADDR = ELF32_SHDR_FLAGS + 4
-ELF32_SHDR_OFFSET = ELF32_SHDR_ADDR + 4
-ELF32_SHDR_SIZE = ELF32_SHDR_OFFSET + 4
-ELF32_SHDR_LINK = ELF32_SHDR_SIZE + 4
-ELF32_SHDR_INFO = ELF32_SHDR_LINK + 4
-ELF32_SHDR_ADDRALIGN = ELF32_SHDR_INFO + 4
-ELF32_SHDR_ENTSIZE = ELF32_SHDR_ADDRALIGN + 4
+ELF64_SHDR_NAME = 0
+ELF64_SHDR_TYPE = ELF64_SHDR_NAME + 4
+ELF64_SHDR_FLAGS = ELF64_SHDR_TYPE + 4
+ELF64_SHDR_ADDR = ELF64_SHDR_FLAGS + 8
+ELF64_SHDR_OFFSET = ELF64_SHDR_ADDR + 8
+ELF64_SHDR_SIZE = ELF64_SHDR_OFFSET + 8
+ELF64_SHDR_LINK = ELF64_SHDR_SIZE + 8
+ELF64_SHDR_INFO = ELF64_SHDR_LINK + 4
+ELF64_SHDR_ADDRALIGN = ELF64_SHDR_INFO + 4
+ELF64_SHDR_ENTSIZE = ELF64_SHDR_ADDRALIGN + 8
 
-ELF32_SYM_NAME = 0
-ELF32_SYM_VALUE = ELF32_SYM_NAME + 4
-ELF32_SYM_SIZE = ELF32_SYM_VALUE + 4
-ELF32_SYM_INFO = ELF32_SYM_SIZE + 4
-ELF32_SYM_OTHER = ELF32_SYM_INFO + 1
-ELF32_SYM_SHNDX = ELF32_SYM_OTHER + 1
+ELF64_SYM_NAME = 0
+ELF64_SYM_INFO = ELF64_SYM_NAME + 4
+ELF64_SYM_OTHER = ELF64_SYM_INFO + 1
+ELF64_SYM_SHNDX = ELF64_SYM_OTHER + 1
+ELF64_SYM_VALUE = ELF64_SYM_SHNDX + 2
+ELF64_SYM_SIZE = ELF64_SYM_VALUE + 8
 
-ELF32_PHDR_TYPE = 0
-ELF32_PHDR_OFFSET = ELF32_PHDR_TYPE + 4
-ELF32_PHDR_VADDR = ELF32_PHDR_OFFSET + 4
-ELF32_PHDR_PADDR = ELF32_PHDR_VADDR + 4
-ELF32_PHDR_FILESZ = ELF32_PHDR_PADDR + 4
-ELF32_PHDR_MEMSZ = ELF32_PHDR_FILESZ + 4
-ELF32_PHDR_FLAGS = ELF32_PHDR_MEMSZ + 4
-ELF32_PHDR_ALIGN = ELF32_PHDR_FLAGS + 4
-ELF32_PHDR_SIZE = ELF32_PHDR_ALIGN + 4
+ELF64_PHDR_TYPE = 0
+ELF64_PHDR_FLAGS = ELF64_PHDR_TYPE + 4
+ELF64_PHDR_OFFSET = ELF64_PHDR_FLAGS + 4
+ELF64_PHDR_VADDR = ELF64_PHDR_OFFSET + 8
+ELF64_PHDR_PADDR = ELF64_PHDR_VADDR + 8
+ELF64_PHDR_FILESZ = ELF64_PHDR_PADDR + 8
+ELF64_PHDR_MEMSZ = ELF64_PHDR_FILESZ + 8
+ELF64_PHDR_ALIGN = ELF64_PHDR_MEMSZ + 8
+ELF64_PHDR_SIZE = ELF64_PHDR_ALIGN + 8
 
-elf32_is_file_supported?:
+elf64_is_file_supported?:
 
 ; in:
-;   - eax/rax: ptr to elf32_header
+;   - eax/rax: ptr to elf64_header
 ; out:
 ;   - cf: 1 if not supported, 0 if supported
 
@@ -82,25 +82,25 @@ elf32_is_file_supported?:
         test rax, rax
         jz @f
 
-        cmp dword [rax + ELF32_HEADER_IDENT_MAGIC], 0x464C457F ; 0x7F, "ELF"
+        cmp dword [rax + ELF64_HEADER_IDENT_MAGIC], 0x464C457F ; 0x7F, "ELF"
         jne @f
 
-        cmp byte [rax + ELF32_HEADER_IDENT_CLASS], 1 ; x86
+        cmp byte [rax + ELF64_HEADER_IDENT_CLASS], 2 ; 64-bit (ELFCLASS64)
         jne @f
 
-        cmp byte [rax + ELF32_HEADER_IDENT_DATA], 1 ; little endian
+        cmp byte [rax + ELF64_HEADER_IDENT_DATA], 1 ; little endian
         jne @f
 
-        cmp word [rax + ELF32_HEADER_MACHINE], 3 ; x86
+        cmp word [rax + ELF64_HEADER_MACHINE], 62 ; x86-64 (EM_X86_64)
         jne @f
 
-        cmp byte [rax + ELF32_HEADER_IDENT_VERSION], 1
+        cmp byte [rax + ELF64_HEADER_IDENT_VERSION], 1
         jne @f
 
-        cmp word [rax + ELF32_HEADER_TYPE], 1 ; relocatable
+        cmp word [rax + ELF64_HEADER_TYPE], 1 ; relocatable
         jb @f
 
-        cmp word [rax + ELF32_HEADER_TYPE], 2 ; executable
+        cmp word [rax + ELF64_HEADER_TYPE], 2 ; executable
         ja @f
 
         clc
@@ -113,25 +113,25 @@ elf32_is_file_supported?:
         test eax, eax
         jz @f
 
-        cmp dword [eax + ELF32_HEADER_IDENT_MAGIC], 0x464C457F ; 0x7F, "ELF"
+        cmp dword [eax + ELF64_HEADER_IDENT_MAGIC], 0x464C457F ; 0x7F, "ELF"
         jne @f
 
-        cmp byte [eax + ELF32_HEADER_IDENT_CLASS], 1 ; x86
+        cmp byte [eax + ELF64_HEADER_IDENT_CLASS], 2 ; 64-bit (ELFCLASS64)
         jne @f
 
-        cmp byte [eax + ELF32_HEADER_IDENT_DATA], 1 ; little endian
+        cmp byte [eax + ELF64_HEADER_IDENT_DATA], 1 ; little endian
         jne @f
 
-        cmp word [eax + ELF32_HEADER_MACHINE], 3 ; x86
+        cmp word [eax + ELF64_HEADER_MACHINE], 62 ; x86-64 (EM_X86_64)
         jne @f
 
-        cmp byte [eax + ELF32_HEADER_IDENT_VERSION], 1
+        cmp byte [eax + ELF64_HEADER_IDENT_VERSION], 1
         jne @f
 
-        cmp word [eax + ELF32_HEADER_TYPE], 1 ; relocatable
+        cmp word [eax + ELF64_HEADER_TYPE], 1 ; relocatable
         jb @f
 
-        cmp word [eax + ELF32_HEADER_TYPE], 2 ; executable
+        cmp word [eax + ELF64_HEADER_TYPE], 2 ; executable
         ja @f
 
         clc
@@ -142,11 +142,11 @@ elf32_is_file_supported?:
             ret
     end if
 
-elf32_load_segment:
+elf64_load_segment:
 
 ; in:
-;   - ebx/rbx: pointer to elf32 image in memory
-;   - ecx/rcx: pointer to elf32 program header
+;   - ebx/rbx: pointer to elf64 image in memory
+;   - ecx/rcx: pointer to elf64 program header
 ;   - edx/rdx: relocation delta (target_base - preferred_base)
 ; out:
 ;   - cf: set if segment cannot be loaded
@@ -159,29 +159,29 @@ elf32_load_segment:
         push rdi
 
         ; check memsz >= filesz
-        mov eax, [rcx + ELF32_PHDR_FILESZ]
-        cmp eax, [rcx + ELF32_PHDR_MEMSZ]
+        mov rax, [rcx + ELF64_PHDR_FILESZ]
+        cmp rax, [rcx + ELF64_PHDR_MEMSZ]
         ja .error
 
-        ; copy segment from raw image to target memory address (p_paddr + delta)
-        mov esi, [rcx + ELF32_PHDR_OFFSET]
+        ; copy segment from raw image to target memory address (p_vaddr + delta)
+        mov rsi, [rcx + ELF64_PHDR_OFFSET]
         add rsi, rbx
         jc .error
 
-        mov edi, [rcx + ELF32_PHDR_VADDR]
+        mov rdi, [rcx + ELF64_PHDR_VADDR]
         add rdi, rdx
 
         push rcx
         push rax
-        mov ecx, eax
+        mov rcx, rax
         rep movsb
 
         ; clear out remaining bss memory (memsz - filesz)
         pop rax
         pop rcx
-        mov edx, [rcx + ELF32_PHDR_MEMSZ]
-        sub edx, eax
-        mov ecx, edx
+        mov rdx, [rcx + ELF64_PHDR_MEMSZ]
+        sub rdx, rax
+        mov rcx, rdx
         xor eax, eax
         rep stosb
 
@@ -206,16 +206,16 @@ elf32_load_segment:
         push edi
 
         ; check memsz >= filesz
-        mov eax, [ecx + ELF32_PHDR_FILESZ]
-        cmp eax, [ecx + ELF32_PHDR_MEMSZ]
+        mov eax, dword [ecx + ELF64_PHDR_FILESZ]
+        cmp eax, dword [ecx + ELF64_PHDR_MEMSZ]
         ja .error
 
-        ; copy segment from raw image to target memory address (p_paddr + delta)
-        mov esi, [ecx + ELF32_PHDR_OFFSET]
+        ; copy segment from raw image to target memory address (p_vaddr + delta)
+        mov esi, dword [ecx + ELF64_PHDR_OFFSET]
         add esi, ebx
         jc .error
 
-        mov edi, [ecx + ELF32_PHDR_VADDR]
+        mov edi, dword [ecx + ELF64_PHDR_VADDR]
         add edi, edx
 
         push ecx
@@ -226,7 +226,7 @@ elf32_load_segment:
         ; clear out remaining bss memory (memsz - filesz)
         pop eax
         pop ecx
-        mov edx, [ecx + ELF32_PHDR_MEMSZ]
+        mov edx, dword [ecx + ELF64_PHDR_MEMSZ]
         sub edx, eax
         mov ecx, edx
         xor eax, eax
@@ -247,7 +247,7 @@ elf32_load_segment:
             ret
     end if
 
-elf32_load_phdrs:
+elf64_load_phdrs:
 
 ; in:
 ;   - eax/rax: pointer to raw elf image
@@ -266,22 +266,22 @@ elf32_load_phdrs:
         mov rsi, rax
 
         ; check phdr size
-        movzx ecx, word [rsi + ELF32_HEADER_PHENTSIZE]
-        cmp ecx, ELF32_PHDR_SIZE
+        movzx ecx, word [rsi + ELF64_HEADER_PHENTSIZE]
+        cmp ecx, ELF64_PHDR_SIZE
         jb .error
 
         ; check phdr count
-        movzx edx, word [rsi + ELF32_HEADER_PHNUM]
+        movzx edx, word [rsi + ELF64_HEADER_PHNUM]
         test edx, edx
         jz .error
 
         ; find first pt_load_phdr to get preferred load base address
         push rdx
         push rbx
-        mov ebx, [rsi + ELF32_HEADER_PHOFF]
+        mov rbx, [rsi + ELF64_HEADER_PHOFF]
     @@: test edx, edx
         jz .no_pt_load_found
-        cmp dword [rsi + rbx + ELF32_PHDR_TYPE], ELF32_PHTYPE_LOAD
+        cmp dword [rsi + rbx + ELF64_PHDR_TYPE], ELF64_PHTYPE_LOAD
         je .found_pt_load
         add rbx, rcx
         dec edx
@@ -294,7 +294,7 @@ elf32_load_phdrs:
 
         .found_pt_load:
             ; found first pt_load
-            mov eax, [rsi + rbx + ELF32_PHDR_VADDR]
+            mov rax, [rsi + rbx + ELF64_PHDR_VADDR]
             pop rbx ; target load base address requested by caller
             pop rdx ; phnum count
 
@@ -306,13 +306,13 @@ elf32_load_phdrs:
             mov rdi, rbx ; store delta in rdi across header loop
 
         ; load pt_load phdrs
-        mov ecx, [rsi + ELF32_HEADER_PHOFF]
+        mov rcx, [rsi + ELF64_HEADER_PHOFF]
 
         .next_header:
             test edx, edx
             jz .loaded
 
-            cmp dword [rsi + rcx + ELF32_PHDR_TYPE], ELF32_PHTYPE_LOAD
+            cmp dword [rsi + rcx + ELF64_PHDR_TYPE], ELF64_PHTYPE_LOAD
             jne .skip
 
             push rcx
@@ -321,21 +321,21 @@ elf32_load_phdrs:
             lea rcx, [rsi + rcx]
             mov rbx, rsi
             mov rdx, rdi ; load delta
-            call elf32_load_segment
+            call elf64_load_segment
 
             pop rdx
             pop rcx
             jc .error_with_delta
 
         .skip:
-            movzx eax, word [rsi + ELF32_HEADER_PHENTSIZE]
+            movzx eax, word [rsi + ELF64_HEADER_PHENTSIZE]
             add rcx, rax
             dec edx
             jmp .next_header
 
         .loaded:
             mov rdx, rdi ; rdx = delta
-            mov eax, [rsi + ELF32_HEADER_ENTRY]
+            mov rax, [rsi + ELF64_HEADER_ENTRY]
             add rax, rdx ; rax = rebased entry point
             clc
             jmp .exit
@@ -361,22 +361,22 @@ elf32_load_phdrs:
         mov esi, eax
 
         ; check phdr size
-        movzx ecx, word [esi + ELF32_HEADER_PHENTSIZE]
-        cmp ecx, ELF32_PHDR_SIZE
+        movzx ecx, word [esi + ELF64_HEADER_PHENTSIZE]
+        cmp ecx, ELF64_PHDR_SIZE
         jb .error
 
         ; check phdr count
-        movzx edx, word [esi + ELF32_HEADER_PHNUM]
+        movzx edx, word [esi + ELF64_HEADER_PHNUM]
         test edx, edx
         jz .error
 
         ; find first pt_load_phdr to get preferred load base address
         push edx
         push ebx
-        mov ebx, [esi + ELF32_HEADER_PHOFF]
+        mov ebx, dword [esi + ELF64_HEADER_PHOFF]
     @@: test edx, edx
         jz .no_pt_load_found
-        cmp dword [esi + ebx + ELF32_PHDR_TYPE], ELF32_PHTYPE_LOAD
+        cmp dword [esi + ebx + ELF64_PHDR_TYPE], ELF64_PHTYPE_LOAD
         je .found_pt_load
         add ebx, ecx
         dec edx
@@ -389,7 +389,7 @@ elf32_load_phdrs:
 
         .found_pt_load:
             ; found first pt_load
-            mov eax, [esi + ebx + ELF32_PHDR_VADDR]
+            mov eax, dword [esi + ebx + ELF64_PHDR_VADDR]
             pop ebx ; target load base address requested by caller
             pop edx ; phnum count
 
@@ -401,13 +401,13 @@ elf32_load_phdrs:
             mov edi, ebx ; store delta in edi across header loop
 
         ; load pt_load phdrs
-        mov ecx, [esi + ELF32_HEADER_PHOFF]
+        mov ecx, dword [esi + ELF64_HEADER_PHOFF]
 
         .next_header:
             test edx, edx
             jz .loaded
 
-            cmp dword [esi + ecx + ELF32_PHDR_TYPE], ELF32_PHTYPE_LOAD
+            cmp dword [esi + ecx + ELF64_PHDR_TYPE], ELF64_PHTYPE_LOAD
             jne .skip
 
             push ecx
@@ -416,21 +416,21 @@ elf32_load_phdrs:
             lea ecx, [esi + ecx]
             mov ebx, esi
             mov edx, edi ; load delta
-            call elf32_load_segment
+            call elf64_load_segment
 
             pop edx
             pop ecx
             jc .error_with_delta
 
         .skip:
-            movzx eax, word [esi + ELF32_HEADER_PHENTSIZE]
+            movzx eax, word [esi + ELF64_HEADER_PHENTSIZE]
             add ecx, eax
             dec edx
             jmp .next_header
 
         .loaded:
             mov edx, edi ; edx = delta
-            mov eax, [esi + ELF32_HEADER_ENTRY]
+            mov eax, dword [esi + ELF64_HEADER_ENTRY]
             add eax, edx ; eax = rebased entry point
             clc
             jmp .exit
@@ -448,19 +448,19 @@ elf32_load_phdrs:
             ret
     end if
 
-elf32_load_file:
+elf64_load_file:
 
 ; in:
 ;   - eax/rax: pointer to image in memory
 ;   - ebx/rbx: target load address (0 = use default)
 ; out:
 ;   - eax/rax: entry point
-;   - cf: set if image cannot be loaded
+;   - cf: set on error
 
-    call elf32_is_file_supported?
+    call elf64_is_file_supported?
     jc .error
 
-    call elf32_load_phdrs
+    call elf64_load_phdrs
     ret
 
     .error:

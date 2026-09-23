@@ -41,7 +41,7 @@ main:
 
     mov eax, 0x10000
     xor ebx, ebx
-    call elf32_load_file
+    call elf64_load_file
     jc reboot
 
     jmp eax
@@ -68,4 +68,4 @@ stage3 db "STAGE3  OUT"
 IS_X64=0
 include "include/ata.inc"
 include "include/fat16.inc"
-include "include/elf32.inc"
+include "include/elf64.inc"

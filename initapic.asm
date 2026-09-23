@@ -21,7 +21,7 @@ IOAPIC_REG_BASE = 0xFEC00000
 IOAPIC_REG_INDEX = IOAPIC_REG_BASE
 IOAPIC_REG_DATA = IOAPIC_REG_BASE + 0x10
 
-format ELF executable 3 at 0x1000
+format elf64 executable 3 at 0x1000
 use64
 entry start
 segment readable executable writable

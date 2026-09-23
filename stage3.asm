@@ -41,7 +41,7 @@ macro popaq {
     pop rax
 }
 
-format ELF executable 3 at 0x100000
+format elf64 executable 3 at 0x100000
 use32
 entry start
 segment readable executable
@@ -161,7 +161,7 @@ load_prog:
     ; reloc elf binary into memory
     mov rax, 0x80000
     mov rbx, [.exec_ptr]
-    call elf32_load_file
+    call elf64_load_file
     jc .error
 
     ; rdx = entry point
@@ -281,7 +281,7 @@ initapic: dq 0
 
 IS_X64=1
 include "include/ata.inc"
-include "include/elf32.inc"
+include "include/elf64.inc"
 include "include/fat16.inc"
 
 segment readable
