@@ -98,29 +98,40 @@ start:
     ; load idt
     lidt [idtr]
 
+    ; load hello world into memory
     mov esi, hello_out
-    call exec
+    call load_prog
+    mov [hello], edx
 
+    ; load initbga into memory
+    mov esi, initbga_out
+    call load_prog
+    mov [initbga], edx
+
+    ; init bga driver
     mov eax, 1024
     mov ebx, 768
     mov cx, 32
-    mov esi, initbga_out
-    call exec
+    call dword [initbga]
+
+    ; run hello world
+    call dword [hello]
 
     sti
 @@: hlt
     jmp @b
 
-exec:
+load_prog:
 
 ; in:
-;   - esi: file name to exec
-;   - eax, ebx, ecx: arguments forwarded to binary
+;   - esi: file name to load
+; out:
+;   - cf: set if error
+;   - edx: entry point of loaded binary
 
-    push ecx
-    push ebx
     push eax
-    
+    push ebx
+
     ; read file into scratch
     mov edi, 0x80000
     call fat16_read_file
@@ -130,25 +141,21 @@ exec:
     mov eax, 0x80000
     mov ebx, [.exec_ptr]
     call elf32_load_file
-    jc @f
+    jc .error
 
     mov edx, eax ; edx = entry point
     pop eax ; eax = file size
     add [.exec_ptr], eax
 
-    pop eax
     pop ebx
-    pop ecx
+    pop eax
 
-    call edx ; exec
     clc
     ret
 
-@@: pop eax ; discard file size
     .error:
-        pop eax
         pop ebx
-        pop ecx
+        pop eax
         stc
         ret
 
@@ -259,6 +266,9 @@ rept 256 n:0 {
         jmp exception_handler
         times 16-($ - .stub#n) db 0
 }
+
+initbga: dd 0
+hello: dd 0
 
 include "include/ata.inc"
 include "include/elf32.inc"
