@@ -78,12 +78,10 @@ elf32_is_file_supported?:
 ; out:
 ;   - cf: 1 if not supported, 0 if supported
 
-    push ebx
-    
     test eax, eax
     jz @f
 
-    cmp dword [eax + ELF32_HEADER_IDENT_MAGIC], 0x464C457F ; 0x7F, "ELF" in little endian
+    cmp dword [eax + ELF32_HEADER_IDENT_MAGIC], 0x464C457F ; 0x7F, "ELF"
     jne @f
 
     cmp byte [eax + ELF32_HEADER_IDENT_CLASS], 1 ; x86
@@ -95,7 +93,7 @@ elf32_is_file_supported?:
     cmp word [eax + ELF32_HEADER_MACHINE], 3 ; x86
     jne @f
 
-    cmp byte [eax + ELF32_HEADER_IDENT_VERSION], 1 ; current version
+    cmp byte [eax + ELF32_HEADER_IDENT_VERSION], 1
     jne @f
 
     cmp word [eax + ELF32_HEADER_TYPE], 1 ; relocatable
@@ -105,21 +103,20 @@ elf32_is_file_supported?:
     ja @f
 
     clc
-    pop ebx
     ret
 
     @@:
         stc
-        pop ebx
         ret
 
 elf32_load_segment:
 
 ; in:
-;   - ebx: pointer to an ELF32 image in memory
-;   - ecx: pointer to an ELF32 program header
+;   - ebx: pointer to elf32 image in memory
+;   - ecx: pointer to elf32 program header
+;   - edx: relocation delta (target_base - preferred_base)
 ; out:
-;   - cf: set if the segment cannot be loaded
+;   - cf: set if segment cannot be loaded
 
     push eax
     push ecx
@@ -132,23 +129,26 @@ elf32_load_segment:
     cmp eax, [ecx + ELF32_PHDR_MEMSZ]
     ja .error
 
-    ; copy segment to memory
+    ; copy segment from raw image to target memory address (p_paddr + delta)
     mov esi, [ecx + ELF32_PHDR_OFFSET]
     add esi, ebx
     jc .error
-    mov edi, [ecx + ELF32_PHDR_PADDR]
+
+    mov edi, [ecx + ELF32_PHDR_VADDR]
+    add edi, edx
+
     push ecx
     push eax
     mov ecx, eax
     rep movsb
 
-    ; clear out remaining memory
+    ; clear out remaining bss memory (memsz - filesz)
     pop eax
     pop ecx
     mov edx, [ecx + ELF32_PHDR_MEMSZ]
     sub edx, eax
-    xor eax, eax
     mov ecx, edx
+    xor eax, eax
     rep stosb
 
     clc
@@ -168,61 +168,102 @@ elf32_load_segment:
 elf32_load_phdrs:
 
 ; in:
-;   - eax: pointer to an elf image in memory
+;   - eax: pointer to raw elf image
+;   - ebx: target load address (0 = use default)
 ; out:
-;   - eax: entry point
-;   - cf: set if the program headers cannot be loaded
+;   - eax: rebased entry point
+;   - cf: set if program headers cannot be loaded
 
     push ebx
     push ecx
     push edx
+    push esi
+    push edi
 
-    mov ebx, eax
-    cmp word [ebx + ELF32_HEADER_PHENTSIZE], ELF32_PHDR_SIZE
+    mov esi, eax
+
+    ; check phdr size
+    movzx ecx, word [esi + ELF32_HEADER_PHENTSIZE]
+    cmp ecx, ELF32_PHDR_SIZE
     jb .error
 
-    ; bounds-check the program header table against the image
-    movzx edx, word [ebx + ELF32_HEADER_PHNUM]
-    mov eax, [ebx + ELF32_HEADER_PHOFF]
-    movzx ecx, word [ebx + ELF32_HEADER_PHENTSIZE]
-    imul ecx, edx
-    add eax, ecx
-    jc .error
+    ; check phdr count
+    movzx edx, word [esi + ELF32_HEADER_PHNUM]
+    test edx, edx
+    jz .error
 
-    mov eax, [ebx + ELF32_HEADER_ENTRY]
-    push eax
-    mov ecx, [ebx + ELF32_HEADER_PHOFF]
+    ; find first pt_load_phdr to get preferred load base address
+    push edx
+    push ebx
+    mov ebx, [esi + ELF32_HEADER_PHOFF]
+@@: test edx, edx
+    jz .no_pt_load_found
+    cmp dword [esi + ebx + ELF32_PHDR_TYPE], ELF32_PHTYPE_LOAD
+    je .found_pt_load
+    add ebx, ecx
+    dec edx
+    jmp @b
+
+    .no_pt_load_found:
+        pop ebx
+        pop edx
+        jmp .error
+
+    .found_pt_load:
+        ; found first pt_load
+        mov eax, [esi + ebx + ELF32_PHDR_VADDR]
+        pop ebx ; target load base address requested by caller
+        pop edx ; phnum count
+
+        ; delta = (target_base - preferred_base)
+        test ebx, ebx
+        jnz @f
+        mov ebx, eax
+    @@: sub ebx, eax
+        mov edi, ebx ; store delta in edi across header loop
+
+    ; load pt_load phdrs
+    mov ecx, [esi + ELF32_HEADER_PHOFF]
 
     .next_header:
         test edx, edx
         jz .loaded
 
-        cmp dword [ebx + ecx + ELF32_PHDR_TYPE], ELF32_PHTYPE_LOAD
+        cmp dword [esi + ecx + ELF32_PHDR_TYPE], ELF32_PHTYPE_LOAD
         jne .skip
 
         push ecx
-        add ecx, ebx
+        push edx
+
+        lea ecx, [esi + ecx]
+        mov ebx, esi
+        mov edx, edi ; load delta
         call elf32_load_segment
+
+        pop edx
         pop ecx
-        jc .error_with_entry
+        jc .error_with_delta
 
     .skip:
-        movzx eax, word [ebx + ELF32_HEADER_PHENTSIZE]
+        movzx eax, word [esi + ELF32_HEADER_PHENTSIZE]
         add ecx, eax
         dec edx
         jmp .next_header
 
     .loaded:
-        pop eax
+        mov edx, edi ; edx = delta
+        mov eax, [esi + ELF32_HEADER_ENTRY]
+        add eax, edx ; eax = rebased entry point
         clc
         jmp .exit
 
-    .error_with_entry:
-        add esp, 4 ; discard entry point
+    .error_with_delta:
     .error:
         stc
 
     .exit:
+        pop edi
+        pop esi
         pop edx
         pop ecx
         pop ebx
@@ -231,10 +272,11 @@ elf32_load_phdrs:
 elf32_load_file:
 
 ; in:
-;   - eax: pointer to an ELF32 image in memory
+;   - eax: pointer to image in memory
+;   - ebx: target load address (0 = use default)
 ; out:
 ;   - eax: entry point
-;   - cf: set if the image cannot be loaded
+;   - cf: set if image cannot be loaded
 
     call elf32_is_file_supported?
     jc .error

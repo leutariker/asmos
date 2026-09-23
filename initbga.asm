@@ -36,7 +36,7 @@ BGA_NOCLEARMEM = 0x80
 BGA_BANK_SIZE_KB = 64
 BGA_BANK_ADDRESS = 0xA0000
 
-format ELF executable 3 at 0x200000
+format ELF executable 3 at 0x1000
 use32
 entry start
 segment readable executable writable

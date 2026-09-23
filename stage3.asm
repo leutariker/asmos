@@ -113,12 +113,15 @@ exec:
 ; in:
 ;   - esi: file name to exec
 
-    mov edi, [.exec_ptr]
+    ; load file into scratch
+    mov edi, 0x80000
     call fat16_read_file
     jc .error
     push eax
 
-    mov eax, [.exec_ptr]
+    ; relocate and load elf
+    mov eax, 0x80000
+    mov ebx, [.exec_ptr]
     call elf32_load_file
     jc .error
 
@@ -126,7 +129,6 @@ exec:
 
     pop eax
     add [.exec_ptr], eax
-
     clc
     ret
 

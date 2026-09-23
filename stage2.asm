@@ -40,6 +40,7 @@ main:
     jc reboot
 
     mov eax, 0x10000
+    xor ebx, ebx
     call elf32_load_file
     jc reboot
 
