@@ -23,10 +23,9 @@ scan2ascii:
 
     push rbx
 
-    call .get_pc
-.get_pc:
-    pop rbx
-    sub rbx, .get_pc
+    call @f
+    @@: pop rbx
+    sub rbx, @b
 
     ; check if scancode is 0xE0 (extended key prefix)
     cmp al, 0xE0

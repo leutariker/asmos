@@ -48,7 +48,17 @@ segment readable executable
 
 start:
     cli
+    cld
 
+    ; check for cpu features
+    mov eax, 0x80000001
+    cpuid
+    bt edx, 9
+    jnc reboot ; reboot if no apic
+    bt edx, 5
+    jnc reboot ; reboot if no msr
+
+    ; load new gdt
     lgdt [gdtr]
 
     ; enable pae
