@@ -37,8 +37,8 @@ segment readable executable writable
 start:
 
 ; in:
-;   - eax/rax: width
-;   - ebx/rbx: height
+;   - rax: width
+;   - rbx: height
 ;   - cx:  bpp
 
     push rcx

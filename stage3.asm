@@ -91,7 +91,7 @@ start:
     lidt [idtr]
 
     ; load apic code into memory
-    mov esi, initapic_out
+    mov rsi, initapic_out
     call load_prog
     mov qword [initapic], rdx
 
@@ -100,29 +100,29 @@ start:
     call qword [initapic]
 
     ; load hello world into memory
-    mov esi, hello_out
+    mov rsi, hello_out
     call load_prog
     mov qword [hello], rdx
 
     ; load initbga into memory
-    mov esi, initbga_out
+    mov rsi, initbga_out
     call load_prog
     mov qword [initbga], rdx
 
     ; load keyboard handler into memory
-    mov esi, keyhndlr_out
+    mov rsi, keyhndlr_out
     call load_prog
     mov qword [irq_handlers.keyboard], rdx
 
     ; load timer handler into memory
-    mov esi, tmrhndlr_out
+    mov rsi, tmrhndlr_out
     call load_prog
     mov qword [irq_handlers.timer], rdx
 
     ; init bga driver
-    mov eax, 1024
-    mov ebx, 768
-    mov cx, 32
+    mov rax, 1024
+    mov rbx, 768
+    mov rcx, 32
     call qword [initbga]
 
     ; run hello world
@@ -281,6 +281,31 @@ initbga_out: mk8.3 "INITBGA", "OUT"
 keyhndlr_out: mk8.3 "KEYHNDLR", "OUT"
 tmrhndlr_out: mk8.3 "TMRHNDLR", "OUT"
 
+align 4096
+pml4:
+    dq pdpt or 0x3
+    times 511 dq 0
+
+align 4096
+pdpt:
+    dq pd0 or 0x3
+    times 2 dq 0
+    dq pd3 or 0x3 ; map ioapic/apic
+    times 508 dq 0
+
+align 4096
+pd0:
+    rept 512 n:0 {
+        dq (n * 0x200000) or 0x83
+    }
+
+align 4096
+pd3:
+    rept 512 n:0 {
+        dq (0xC0000000 + (n * 0x200000)) or 0x83
+    }
+
+align 16
 idt:
     rept 256 n:0 {
     .idt_entry#n:
@@ -296,6 +321,7 @@ idtr:
     dw $ - idt - 1
     dq idt
 
+align 16
 gdt:
     dq 0x0000000000000000
     dq 0x00CF92000000FFFF
@@ -357,30 +383,6 @@ error_messages:
 
 segment readable writable
 lapic: dq 0
-
-align 4096
-pml4:
-    dq pdpt or 0x3
-    times 511 dq 0
-
-align 4096
-pdpt:
-    dq pd0 or 0x3
-    times 2 dq 0
-    dq pd3 or 0x3
-    times 508 dq 0
-
-align 4096
-pd0:
-    rept 512 n:0 {
-        dq (n * 0x200000) or 0x83
-    }
-
-align 4096
-pd3:
-    rept 512 n:0 {
-        dq (0xC0000000 + (n * 0x200000)) or 0x83
-    }
 
 align 16
 stack_btm:
