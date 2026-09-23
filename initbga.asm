@@ -40,10 +40,10 @@ start:
 ;   - eax: width
 ;   - ebx: height
 ;   - cx:  bpp
-    
-    mov [.width], eax
-    mov [.height], ebx
-    mov [.bpp], cx
+
+    push ecx
+    push ebx
+    push eax 
 
     ; check if bga is supported
     mov dx, BGA_IOPORT_INDEX
@@ -71,7 +71,7 @@ start:
     out dx, ax
 
     mov dx, BGA_IOPORT_DATA
-    mov ax, [.width]
+    pop eax ; pop width
     out dx, ax
 
     ; set height
@@ -80,7 +80,7 @@ start:
     out dx, ax
 
     mov dx, BGA_IOPORT_DATA
-    mov ax, [.height]
+    pop eax ; pop height
     out dx, ax
 
     ; set bpp
@@ -89,7 +89,7 @@ start:
     out dx, ax
 
     mov dx, BGA_IOPORT_DATA
-    mov ax, [.bpp]
+    pop eax ; pop bpp
     out dx, ax
 
     ; enable vbe extensions and lfb again
@@ -101,8 +101,7 @@ start:
     mov ax, BGA_ENABLED or BGA_LFB_ENABLED
     out dx, ax
 
-@@: ret
+    ret
 
-    .width: dd 0
-    .height: dd 0
-    .bpp: dw 0
+@@: add esp, 12
+    ret

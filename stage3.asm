@@ -117,6 +117,11 @@ start:
     call load_prog
     mov [irq_handlers.keyboard], edx
 
+    ; load timer handler into memory
+    mov esi, tmrhndlr_out
+    call load_prog
+    mov [irq_handlers.timer], edx
+
     ; init bga driver
     mov eax, 1024
     mov ebx, 768
@@ -145,16 +150,21 @@ load_prog:
     mov edi, 0x80000
     call fat16_read_file
     jc .error
-    push eax ; save file size
 
+    ; reloc elf binary into memory
     mov eax, 0x80000
     mov ebx, [.exec_ptr]
     call elf32_load_file
     jc .error
 
-    mov edx, eax ; edx = entry point
-    pop eax ; eax = file size
-    add [.exec_ptr], eax
+    ; edx = entry point
+    mov edx, eax
+    
+    ; align exec ptr to next 64kb boundary
+    mov eax, [.exec_ptr]
+    add eax, 0x10000
+    and eax, 0xFFFF0000
+    mov [.exec_ptr], eax
 
     pop ebx
     pop eax
@@ -217,13 +227,28 @@ exception_handler:
 ;   - eax: vector number
 ;   - ebx: error code (if eax is 8,10,11,12,13,14,17,21)
 
+    pushad
+
     cmp eax, 31
     jle .error
-    cmp eax, 31
-    jg .irq
 
-    iret
+    .irq:
+        sub eax, 32 ; convert vector to irq
 
+        cmp eax, 223
+        je @f ; spurious irq
+
+        mov ebx, [irq_handlers + eax*4]
+        test ebx, ebx
+        jz .eoi
+        call ebx
+
+    .eoi:    
+        mov ecx, [lapic]
+        mov dword [ecx + APIC_REG_EOI], 0
+@@:     popad
+        iret
+    
     .error:    
         mov esi, error_messages
         mov ecx, eax
@@ -233,19 +258,6 @@ exception_handler:
         cli
 @@:     hlt
         jmp @b
-
-    .irq:
-        sub eax, 32 ; convert vector to irq
-        mov eax, [irq_handlers + eax*4]
-        test eax, eax
-        jz @f
-        call eax
-        @@:
-    
-        ; send eoi to apic
-        mov ecx, [lapic]
-        mov dword [ecx + APIC_REG_EOI], 0
-        iret
 
 debug:
 
@@ -298,14 +310,15 @@ segment readable
 hello_out: mk8.3 "HELLO", "OUT"
 initbga_out: mk8.3 "INITBGA", "OUT"
 keyhndlr_out: mk8.3 "KEYHNDLR", "OUT"
+tmrhndlr_out: mk8.3 "TMRHNDLR", "OUT"
 
 idt:
     rept 256 n:0 {
-        dw ((idt_stubs + (16 * n)) and 0xFFFF) ; isr low
+        dw ((idt_stubs.stub#n) and 0xFFFF) ; isr low
         dw 0x10 ; cs
         db 0 ; reserved
         db 0x8E ; attr
-        dw ((idt_stubs + (16 * n)) shr 16) ; isr high
+        dw ((idt_stubs.stub#n) shr 16) ; isr high
     }
 idtr:
     dw $ - idt - 1
@@ -322,7 +335,7 @@ gdtr:
 irq_handlers:
     .timer: dd 0
     .keyboard: dd 0
-    times 224 dd 0
+    times ((256*4)-($-irq_handlers)) dd 0
 
 error_messages:
 @@: db "Divide by zero", 0
