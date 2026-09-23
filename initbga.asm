@@ -19,13 +19,6 @@ BGA_ID3 = 0xB0C3
 BGA_ID4 = 0xB0C4
 BGA_ID5 = 0xB0C5
 
-BGA_BPP_4 = 4
-BGA_BPP_8 = 8
-BGA_BPP_15 = 15
-BGA_BPP_16 = 16
-BGA_BPP_24 = 24
-BGA_BPP_32 = 32
-
 BGA_DISABLED = 0x00
 BGA_ENABLED = 0x01
 BGA_GETCAPS = 0x02
@@ -43,8 +36,14 @@ segment readable executable writable
 
 start:
 
-    mov al, 'X'
-    out 0xE9, al
+; in:
+;   - eax: width
+;   - ebx: height
+;   - cx:  bpp
+    
+    mov [.width], eax
+    mov [.height], ebx
+    mov [.bpp], cx
 
     ; check if bga is supported
     mov dx, BGA_IOPORT_INDEX
@@ -72,7 +71,7 @@ start:
     out dx, ax
 
     mov dx, BGA_IOPORT_DATA
-    mov ax, 1024
+    mov ax, [.width]
     out dx, ax
 
     ; set height
@@ -81,7 +80,7 @@ start:
     out dx, ax
 
     mov dx, BGA_IOPORT_DATA
-    mov ax, 768
+    mov ax, [.height]
     out dx, ax
 
     ; set bpp
@@ -90,7 +89,7 @@ start:
     out dx, ax
 
     mov dx, BGA_IOPORT_DATA
-    mov ax, BGA_BPP_32
+    mov ax, [.bpp]
     out dx, ax
 
     ; enable vbe extensions and lfb again
@@ -103,3 +102,7 @@ start:
     out dx, ax
 
 @@: ret
+
+    .width: dd 0
+    .height: dd 0
+    .bpp: dw 0

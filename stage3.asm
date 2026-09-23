@@ -101,6 +101,9 @@ start:
     mov esi, hello_out
     call exec
 
+    mov eax, 1024
+    mov ebx, 768
+    mov cx, 32
     mov esi, initbga_out
     call exec
 
@@ -112,27 +115,40 @@ exec:
 
 ; in:
 ;   - esi: file name to exec
+;   - eax, ebx, ecx: arguments forwarded to binary
 
-    ; load file into scratch
+    push ecx
+    push ebx
+    push eax
+    
+    ; read file into scratch
     mov edi, 0x80000
     call fat16_read_file
     jc .error
-    push eax
+    push eax ; save file size
 
-    ; relocate and load elf
     mov eax, 0x80000
     mov ebx, [.exec_ptr]
     call elf32_load_file
-    jc .error
+    jc @f
 
-    call eax
+    mov edx, eax ; edx = entry point
+    pop eax ; eax = file size
+    add [.exec_ptr], eax
 
     pop eax
-    add [.exec_ptr], eax
+    pop ebx
+    pop ecx
+
+    call edx ; exec
     clc
     ret
 
+@@: pop eax ; discard file size
     .error:
+        pop eax
+        pop ebx
+        pop ecx
         stc
         ret
 
