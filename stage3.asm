@@ -101,6 +101,9 @@ start:
     mov esi, hello_out
     call exec
 
+    mov esi, initbga_out
+    call exec
+
     sti
 @@: hlt
     jmp @b
@@ -245,6 +248,7 @@ include "include/fat16.inc"
 
 segment readable
 hello_out: mk8.3 "HELLO", "OUT"
+initbga_out: mk8.3 "INITBGA", "OUT"
 
 idt:
     rept 256 n:0 {
