@@ -94,15 +94,32 @@ start:
     mov fs, ax
 
     ; set up new stack
-    mov rsp, stack_top
+    mov rsp, sys_stack
     mov rbp, rsp
+
+    ; link tss
+    mov rax, tss
+    mov [gdt_tss.base_low], ax
+    shr rax, 16
+    mov [gdt_tss.base_mid], al
+    shr rax, 8
+    mov [gdt_tss.base_high], al
+    shr rax, 8
+    mov [gdt_tss.base_upper], eax
+
+    ; set tss rsp0
+    mov qword [tss.rsp0], sys_stack
+
+    ; load tss
+    mov ax, 0x28
+    ltr ax
 
     ; load idt
     lidt [idtr]
 
     ; load apic code into memory
     mov rsi, initapic_out
-    call load_prog
+    call stage
     mov qword [initapic], rdx
 
     ; init apic
@@ -111,26 +128,29 @@ start:
 
     ; load initbga into memory
     mov rsi, initbga_out
-    call load_prog
+    call stage
     mov qword [initbga], rdx
 
     ; load keyboard handler into memory
     mov rsi, keyhndlr_out
-    call load_prog
+    call stage
     mov qword [irqs+(0x21*8)], rdx
 
     ; load timer handler into memory
     mov rsi, tmrhndlr_out
-    call load_prog
+    call stage
     mov qword [irqs+(0x20*8)], rdx
-
-    ; load hello world syscall into memory
-    mov rsi, hello_out
-    call load_prog
-    mov qword [syscalls+(0xFF*8)], rdx
 
     ; init syscall handler
     mov qword [irqs+(0x80*8)], syscall_handler
+
+    ; load hello world syscall into memory
+    mov rsi, hello_out
+    call stage
+    mov qword [syscalls+(0xFF*8)], rdx
+
+    ; init exit syscall
+    mov qword [syscalls+(0xFE*8)], exit
 
     ; init bga driver
     mov rax, 1024
@@ -141,6 +161,11 @@ start:
     ; run hello world syscall
     mov rcx, 0xFF
     int 0x80
+
+    ; run test binary
+    mov rsi, test_out
+    call stage
+    call exec
 
     sti
 @@: hlt
@@ -157,10 +182,29 @@ syscall_handler:
     call rax
 @@: ret
 
-load_prog:
+exec:
 
 ; in:
-;   - rsi: file name to load
+;   - rdx: entry point
+
+    xor ax, ax
+    mov ds, ax
+    mov es, ax
+    mov fs, ax
+    mov gs, ax
+
+    push 0x1B ; ss
+    push user_stack ; rsp
+    push 0x3202 ; rflags (sti, iopl=3)
+    push 0x23 ; cs
+    push rdx
+
+    iretq
+
+stage:
+
+; in:
+;   - rsi: file name to stage
 ; out:
 ;   - cf: set if error
 ;   - rdx: entry point of loaded binary
@@ -175,7 +219,7 @@ load_prog:
 
     ; reloc elf binary into memory
     mov rax, 0x80000
-    mov rbx, [.exec_ptr]
+    mov rbx, [.load_ptr]
     call elf64_load_file
     jc .error
 
@@ -183,10 +227,10 @@ load_prog:
     mov rdx, rax
 
     ; align exec ptr to next 64kb boundary
-    mov rax, [.exec_ptr]
+    mov rax, [.load_ptr]
     add rax, 0x10000
     and rax, -0x10000
-    mov [.exec_ptr], rax
+    mov [.load_ptr], rax
 
     pop rbx
     pop rax
@@ -200,7 +244,7 @@ load_prog:
         stc
         ret
 
-    .exec_ptr: dq 0x200000
+    .load_ptr: dq 0x200000
 
 reboot:
     cli
@@ -245,6 +289,14 @@ exception_handler:
         cli
     @@: hlt
         jmp @b
+
+exit:
+    mov rsp, sys_stack
+    mov rbp, rsp
+
+    sti
+@@: hlt
+    jmp @b
 
 debug:
 
@@ -303,29 +355,30 @@ initbga_out: mk8.3 "INITBGA", "OUT"
 keyhndlr_out: mk8.3 "KEYHNDLR", "OUT"
 tmrhndlr_out: mk8.3 "TMRHNDLR", "OUT"
 hello_out: mk8.3 "HELLO", "OUT"
+test_out: mk8.3 "TEST", "OUT"
 
 align 4096
 pml4:
-    dq pdpt or 0x3
+    dq pdpt or 0x7
     times 511 dq 0
 
 align 4096
 pdpt:
-    dq pd0 or 0x3
+    dq pd0 or 0x7
     times 2 dq 0
-    dq pd3 or 0x3 ; map ioapic/apic
+    dq pd3 or 0x7 ; map ioapic/apic
     times 508 dq 0
 
 align 4096
 pd0:
     rept 512 n:0 {
-        dq (n * 0x200000) or 0x83
+        dq (n * 0x200000) or 0x87
     }
 
 align 4096
 pd3:
     rept 512 n:0 {
-        dq (0xC0000000 + (n * 0x200000)) or 0x83
+        dq (0xC0000000 + (n * 0x200000)) or 0x87
     }
 
 align 16
@@ -345,17 +398,28 @@ idt:
         dd 0 ; reserved
     }
 idtr:
-    dw $ - idt - 1
-    dq idt
+    .limit: dw $ - idt - 1
+    .base: dq idt
 
 align 16
 gdt:
-    dq 0x0000000000000000
-    dq 0x00CF92000000FFFF
-    dq 0x00AF9A000000FFFF
+    .null: dq 0x0000000000000000 ; null
+    .sys_ds: dq 0x00CF92000000FFFF ; kernel ds
+    .sys_cs: dq 0x00AF9A000000FFFF ; kernel cs
+    .user_ds: dq 0x00CFF2000000FFFF ; user ds
+    .user_cs: dq 0x00AFFA000000FFFF ; user cs
+gdt_tss:
+    .limit: dw 103
+    .base_low: dw 0
+    .base_mid: db 0
+    .flags: db 0x89
+    .limit_high: db 0
+    .base_high: db 0
+    .base_upper: dd 0
+    .reserved: dd 0
 gdtr:
-    dw $ - gdt - 1
-    dq gdt
+    .limit: dw $ - gdt - 1
+    .base: dq gdt
 
 error_messages:
 @@: db "Divide by zero", 0
@@ -407,6 +471,21 @@ segment readable writable
 lapic: dq 0
 
 align 16
-stack_btm:
+tss:
+    .reserved: dd 0
+    .rsp0: dq 0
+    .rsp1: dq 0
+    .rsp2: dq 0
+    .reserved2: dq 0
+    .ist: times 7 dq 0
+    .reserved3: dq 0
+    .reserved4: dw 0
+    .base: dw 104
+
+align 16
 rb 16384
-stack_top:
+user_stack:
+
+align 16
+rb 16384
+sys_stack:
