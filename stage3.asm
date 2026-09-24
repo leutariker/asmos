@@ -109,11 +109,6 @@ start:
     lea rax, [lapic] ; pass ptr of apic base address
     call qword [initapic]
 
-    ; load hello world into memory
-    mov rsi, hello_out
-    call load_prog
-    mov qword [hello], rdx
-
     ; load initbga into memory
     mov rsi, initbga_out
     call load_prog
@@ -122,12 +117,20 @@ start:
     ; load keyboard handler into memory
     mov rsi, keyhndlr_out
     call load_prog
-    mov qword [irq_handlers.keyboard], rdx
+    mov qword [irqs+(0x21*8)], rdx
 
     ; load timer handler into memory
     mov rsi, tmrhndlr_out
     call load_prog
-    mov qword [irq_handlers.timer], rdx
+    mov qword [irqs+(0x20*8)], rdx
+
+    ; load hello world syscall into memory
+    mov rsi, hello_out
+    call load_prog
+    mov qword [syscalls+(0xFF*8)], rdx
+
+    ; init syscall handler
+    mov qword [irqs+(0x80*8)], syscall_handler
 
     ; init bga driver
     mov rax, 1024
@@ -135,12 +138,24 @@ start:
     mov rcx, 32
     call qword [initbga]
 
-    ; run hello world
-    call qword [hello]
+    ; run hello world syscall
+    mov rcx, 0xFF
+    int 0x80
 
     sti
 @@: hlt
     jmp @b
+
+syscall_handler:
+
+; in:
+;   - rcx: syscall number
+
+    mov rax, [syscalls+(rcx*8)]
+    test rax, rax
+    jz @f
+    call rax
+@@: ret
 
 load_prog:
 
@@ -197,31 +212,27 @@ reboot:
     hlt
 
 exception_handler:
-
-; in:
-;   - rax: vector number
-;   - rbx: error code (if rax is 8,10,11,12,13,14,17,21)
-
     pushaq
 
     cmp rax, 31
     jle .error
 
-    .irq:
-        sub rax, 32 ; convert vector to irq
+    cmp rax, 255
+    je .done ; spurious
 
-        cmp rax, 223
-        je @f ; spurious irq
-
-        mov rbx, [irq_handlers + rax*8]
-        test rbx, rbx
-        jz .eoi
-        call rbx
+    mov rbx, [irqs + rax*8]
+    test rbx, rbx
+    jz .eoi
+    call rbx
 
     .eoi:
         mov rcx, [lapic]
+        test rcx, rcx
+        jz .done
         mov dword [rcx + 0xB0], 0
-@@:     popaq
+
+    .done:
+        popaq
         iretq
 
     .error:
@@ -232,7 +243,7 @@ exception_handler:
         add rsi, rcx
         call debug
         cli
-@@:     hlt
+    @@: hlt
         jmp @b
 
 debug:
@@ -250,6 +261,7 @@ debug:
 
 idt_stubs:
 rept 256 n:0 {
+    align 16
     .stub#n:
         if n = 8
             pop rbx
@@ -270,14 +282,15 @@ rept 256 n:0 {
         end if
 
         mov rax, n
-
         jmp exception_handler
-        times 16-($ - .stub#n) db 0
 }
 
 initbga: dq 0
-hello: dq 0
 initapic: dq 0
+
+irqs: times 256 dq @f
+syscalls: times 256 dq @f
+@@: ret
 
 IS_X64=1
 include "include/ata.inc"
@@ -286,10 +299,10 @@ include "include/fat16.inc"
 
 segment readable
 initapic_out: mk8.3 "INITAPIC", "OUT"
-hello_out: mk8.3 "HELLO", "OUT"
 initbga_out: mk8.3 "INITBGA", "OUT"
 keyhndlr_out: mk8.3 "KEYHNDLR", "OUT"
 tmrhndlr_out: mk8.3 "TMRHNDLR", "OUT"
+hello_out: mk8.3 "HELLO", "OUT"
 
 align 4096
 pml4:
@@ -322,7 +335,11 @@ idt:
         dw ((idt_stubs.stub#n) and 0xFFFF) ; isr low
         dw 0x10 ; cs
         db 0 ; ist
-        db 0x8E ; attr
+        if n = 0x80
+            db 0xEE ; dpl 3 for syscall
+        else
+            db 0x8E ; interrupt gate
+        end if
         dw ((idt_stubs.stub#n shr 16) and 0xFFFF) ; isr mid
         dd ((idt_stubs.stub#n shr 32) and 0xFFFFFFFF) ; isr high
         dd 0 ; reserved
@@ -339,11 +356,6 @@ gdt:
 gdtr:
     dw $ - gdt - 1
     dq gdt
-
-irq_handlers:
-    .timer: dq 0
-    .keyboard: dq 0
-    times 224 dq 0
 
 error_messages:
 @@: db "Divide by zero", 0
