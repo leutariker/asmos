@@ -7,5 +7,4 @@ start:
     mov al, 'U'
     out 0xE9, al
     
-    mov rcx, 0x01
-    int 0x80
+    ret

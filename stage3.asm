@@ -119,7 +119,7 @@ start:
 
     ; load apic code into memory
     mov rsi, initapic_out
-    call stage
+    call load_binary
     mov qword [initapic], rdx
 
     ; init apic
@@ -128,17 +128,17 @@ start:
 
     ; load initbga into memory
     mov rsi, initbga_out
-    call stage
+    call load_binary
     mov qword [initbga], rdx
 
     ; load keyboard handler into memory
     mov rsi, keyhndlr_out
-    call stage
+    call load_binary
     mov qword [irqs+(0x21*8)], rdx
 
     ; load timer handler into memory
     mov rsi, tmrhndlr_out
-    call stage
+    call load_binary
     mov qword [irqs+(0x20*8)], rdx
 
     ; init syscall handler
@@ -146,11 +146,11 @@ start:
 
     ; load hello world syscall into memory
     mov rsi, hello_out
-    call stage
+    call load_binary
     mov qword [syscalls+(0xFF*8)], rdx
 
     ; init exit syscall
-    mov qword [syscalls+(0xFE*8)], exit
+    mov qword [syscalls+(0x01*8)], exit
 
     ; init bga driver
     mov rax, 1024
@@ -158,53 +158,55 @@ start:
     mov rcx, 32
     call qword [initbga]
 
+    ; run test binary
+    mov rsi, test_out
+    call load_binary
+    call exec
+
     ; run hello world syscall
     mov rcx, 0xFF
     int 0x80
 
-    ; run test binary
-    mov rsi, test_out
-    call stage
-    call exec
-
     sti
 @@: hlt
     jmp @b
-
-syscall_handler:
-
-; in:
-;   - rcx: syscall number
-
-    mov rax, [syscalls+(rcx*8)]
-    test rax, rax
-    jz @f
-    call rax
-@@: ret
 
 exec:
 
 ; in:
 ;   - rdx: entry point
 
-    xor ax, ax
+    pop rax
+    mov [exit.rip], rax
+    mov [exit.stack], rsp
+
+    ; put exit stub on stack so ret = exit syscall
+    mov rax, .exit_stub
+    mov [user_stack - 8], rax
+
+    mov ax, 0x1B
     mov ds, ax
     mov es, ax
     mov fs, ax
     mov gs, ax
 
     push 0x1B ; ss
-    push user_stack ; rsp
+    lea rax, [user_stack - 8]
+    push rax ; rsp
     push 0x3202 ; rflags (sti, iopl=3)
     push 0x23 ; cs
     push rdx
 
     iretq
 
-stage:
+    .exit_stub:
+        mov rcx, 0x01 ; exit syscall
+        int 0x80
+
+load_binary:
 
 ; in:
-;   - rsi: file name to stage
+;   - rsi: file name to load
 ; out:
 ;   - cf: set if error
 ;   - rdx: entry point of loaded binary
@@ -251,9 +253,28 @@ reboot:
 @@: in al, 0x64
     test al, 0x02
     jnz @b
-    mov al, 0xFE
+    mov al, 0x01
     out 0x64, al
     hlt
+
+exit:
+    mov ax, 0x08
+    mov ds, ax
+    mov es, ax
+    mov ss, ax
+    mov rsp, [exit.stack]
+    jmp qword [exit.rip]
+
+syscall_handler:
+
+; in:
+;   - rcx: syscall number
+
+    mov rax, [syscalls+(rcx*8)]
+    test rax, rax
+    jz @f
+    call rax
+@@: ret
 
 exception_handler:
     pushaq
@@ -285,20 +306,12 @@ exception_handler:
         mov rcx, rax
         shl rcx, 5 ; 32 bytes per message
         add rsi, rcx
-        call debug
+        call puts
         cli
     @@: hlt
         jmp @b
 
-exit:
-    mov rsp, sys_stack
-    mov rbp, rsp
-
-    sti
-@@: hlt
-    jmp @b
-
-debug:
+puts:
 
 ; in:
 ;   - rsi: string to print
@@ -308,7 +321,7 @@ debug:
     jz @f
     out 0xE9, al
     inc rsi
-    jmp debug
+    jmp puts
 @@: ret
 
 idt_stubs:
@@ -469,6 +482,9 @@ error_messages:
 
 segment readable writable
 lapic: dq 0
+
+exit.stack: dq 0
+exit.rip: dq 0
 
 align 16
 tss:
