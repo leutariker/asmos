@@ -1,3 +1,5 @@
+IS_X64=1 ; for include/
+
 macro mk8.3 name, ext {
     local .start
     .start: db name
@@ -117,53 +119,47 @@ start:
     ; load idt
     lidt [idtr]
 
-    ; load apic code into memory
+    ; load apic code into memory and init
     mov rsi, initapic_out
     call load_binary
-    mov qword [initapic], rdx
-
-    ; init apic
     lea rax, [lapic] ; pass ptr of apic base address
-    call qword [initapic]
+    call rdx
 
-    ; load initbga into memory
+    ; load bga code into memory and init
     mov rsi, initbga_out
     call load_binary
-    mov qword [initbga], rdx
+    mov rax, 1024
+    mov rbx, 768
+    mov rcx, 32
+    call rdx
 
-    ; load keyboard handler into memory
+    ; load keyboard handler into memory and wire irq
     mov rsi, keyhndlr_out
     call load_binary
     mov qword [irqs+(0x21*8)], rdx
 
-    ; load timer handler into memory
+    ; load timer handler into memory and wire irq
     mov rsi, tmrhndlr_out
     call load_binary
     mov qword [irqs+(0x20*8)], rdx
 
-    ; init syscall handler
-    mov qword [irqs+(0x80*8)], syscall_handler
-
-    ; load hello world syscall into memory
+    ; load hello world into memory and wire syscall
     mov rsi, hello_out
     call load_binary
     mov qword [syscalls+(0xFF*8)], rdx
 
+    ; init syscall handler
+    mov qword [irqs+(0x80*8)], syscall_handler
+
     ; init exit syscall
     mov qword [syscalls+(0x01*8)], exit
 
-    ; init bga driver
-    mov rax, 1024
-    mov rbx, 768
-    mov rcx, 32
-    call qword [initbga]
-
-    ; run test binary
-    mov rsi, test_out
+    ; run hello world as a binary
+    mov rsi, hello_out
     call load_binary
     call exec
 
-    ; run hello world syscall
+    ; run hello world as a syscall
     mov rcx, 0xFF
     int 0x80
 
@@ -277,6 +273,10 @@ syscall_handler:
 @@: ret
 
 exception_handler:
+
+; in:
+;   - rax: exception number
+
     pushaq
 
     cmp rax, 31
@@ -350,14 +350,10 @@ rept 256 n:0 {
         jmp exception_handler
 }
 
-initbga: dq 0
-initapic: dq 0
-
 irqs: times 256 dq @f
 syscalls: times 256 dq @f
 @@: ret
 
-IS_X64=1
 include "include/ata.inc"
 include "include/elf64.inc"
 include "include/fat16.inc"
@@ -368,7 +364,6 @@ initbga_out: mk8.3 "INITBGA", "OUT"
 keyhndlr_out: mk8.3 "KEYHNDLR", "OUT"
 tmrhndlr_out: mk8.3 "TMRHNDLR", "OUT"
 hello_out: mk8.3 "HELLO", "OUT"
-test_out: mk8.3 "TEST", "OUT"
 
 align 4096
 pml4:
