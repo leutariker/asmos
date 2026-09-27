@@ -1,3 +1,10 @@
+macro mk8.3 name, ext {
+    local .start
+    .start: db name
+    times 8 - ($ - .start) db ' '
+    db ext
+}
+
 FAT16_BPB = 0x7C00
 FAT16_SCRATCH = 0x7A00
 

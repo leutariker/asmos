@@ -1,12 +1,5 @@
 IS_X64=1 ; for include/
 
-macro mk8.3 name, ext {
-    local .start
-    .start: db name
-    times 8 - ($ - .start) db ' '
-    db ext
-}
-
 macro pushaq {
     push rax
     push rbx
