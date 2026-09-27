@@ -1,9 +1,8 @@
 format elf64 executable 3 at 0x1000
-use64
-entry start
+include "include/crt0.inc"
 segment readable executable writable
 
-start:
+main:
     lea rsi, [hello_world]
     call debug
     ret

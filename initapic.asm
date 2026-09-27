@@ -52,7 +52,6 @@ start:
     out PIC1_DATA, al
     out PIC2_DATA, al
 
-
     ; enable apic
     mov ecx, APIC_IA32_BASE_MSR
     rdmsr

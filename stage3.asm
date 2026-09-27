@@ -49,9 +49,9 @@ start:
     mov eax, 0x80000001
     cpuid
     bt edx, 9
-    jnc reboot ; reboot if no apic
+    jnc $ ; halt if no apic
     bt edx, 5
-    jnc reboot ; reboot if no msr
+    jnc $ ; halt if no msr
 
     ; load new gdt
     lgdt [gdtr]
@@ -89,7 +89,7 @@ start:
     mov fs, ax
 
     ; set up new stack
-    mov rsp, sys_stack
+    mov rsp, [stacks.sys]
     mov rbp, rsp
 
     ; link tss
@@ -103,7 +103,8 @@ start:
     mov [gdt_tss.base_upper], eax
 
     ; set tss rsp0
-    mov qword [tss.rsp0], sys_stack
+    mov rax, [stacks.sys]
+    mov qword [tss.rsp0], rax
 
     ; load tss
     mov ax, 0x28
@@ -136,25 +137,26 @@ start:
     call load_binary
     mov qword [irqs+(0x20*8)], rdx
 
-    ; load hello world into memory and wire syscall
-    mov rsi, hello_out
-    call load_binary
-    mov qword [syscalls+(0xFF*8)], rdx
-
-    ; init syscall handler
-    mov qword [irqs+(0x80*8)], syscall_handler
-
     ; init exit syscall
-    mov qword [syscalls+(0x01*8)], exit
+    mov qword [syscalls+(SYSCALL_EXIT*8)], exit
 
-    ; run hello world as a binary
-    mov rsi, hello_out
-    call load_binary
-    call exec
+    ; init run syscall
+    mov qword [syscalls+(SYSCALL_RUN*8)], run
 
-    ; run hello world as a syscall
-    mov rcx, 0xFF
+    ; allow 0xE9 for debug output in init
+    mov di, 0xE9
+    mov esi, 1
+    call config_port
+
+    ; run init
+    mov rsi, init_out
+    mov rax, SYSCALL_RUN
     int 0x80
+
+    ; disable 0xE9
+    mov di, 0xE9
+    mov esi, 0
+    call config_port
 
     sti
 @@: hlt
@@ -165,13 +167,18 @@ exec:
 ; in:
 ;   - rdx: entry point
 
-    pop rax
-    mov [exit.rip], rax
-    mov [exit.stack], rsp
+    mov [stacks.exit], rsp ; save rsp
+    mov [tss.rsp0], rsp ; upodate tss rsp0
 
-    ; put exit stub on stack so ret = exit syscall
-    mov rax, .exit_stub
-    mov [user_stack - 8], rax
+    ; alloc 4k for child proc
+    mov rbx, [stacks.user]
+    sub qword [stacks.user], 0x1000
+
+    push 0x1B ; ss
+    push rbx ; rsp
+    pushf ; flags
+    push 0x23 ; cs
+    push rdx ; rip
 
     mov ax, 0x1B
     mov ds, ax
@@ -179,18 +186,7 @@ exec:
     mov fs, ax
     mov gs, ax
 
-    push 0x1B ; ss
-    lea rax, [user_stack - 8]
-    push rax ; rsp
-    push 0x3202 ; rflags (sti, iopl=3)
-    push 0x23 ; cs
-    push rdx
-
     iretq
-
-    .exit_stub:
-        mov rcx, 0x01 ; exit syscall
-        int 0x80
 
 load_binary:
 
@@ -237,33 +233,64 @@ load_binary:
 
     .load_ptr: dq 0x200000
 
-reboot:
-    cli
-@@: in al, 0x64
-    test al, 0x02
-    jnz @b
-    mov al, 0x01
-    out 0x64, al
-    hlt
+run:
+
+; in:
+;   - rsi: file name of binary to run
+
+    call load_binary
+    jc @f
+    call exec
+@@: ret
 
 exit:
-    mov ax, 0x08
-    mov ds, ax
-    mov es, ax
-    mov ss, ax
-    mov rsp, [exit.stack]
-    jmp qword [exit.rip]
+    mov rsp, [stacks.exit] ; restore rsp
+    ret
 
 syscall_handler:
 
 ; in:
-;   - rcx: syscall number
+;   - rax: syscall number
 
-    mov rax, [syscalls+(rcx*8)]
-    test rax, rax
+    pushaq
+
+    push rax
+    mov ax, 0x08
+    mov ds, ax
+    mov es, ax
+    pop rax
+
+    cmp rax, 0xFF
+    jae @f
+
+    mov r11, [syscalls+(rax*8)]
+    test r11, r11
     jz @f
-    call rax
-@@: ret
+    call r11
+    mov [rsp + 112], rax
+    @@:
+
+    ; check dpl of cs to see if we are returning to ring0 or ring3
+    mov ax, [rsp + 128]
+    and ax, 3
+    jz .ring0
+
+    .ring3:
+        mov ax, 0x1B
+        mov ds, ax
+        mov es, ax
+        mov fs, ax
+        mov gs, ax
+        jmp .done
+
+    .ring0:
+        mov ax, 0x08
+        mov ds, ax
+        mov es, ax
+
+    .done:
+        popaq
+        iretq
 
 exception_handler:
 
@@ -271,6 +298,8 @@ exception_handler:
 ;   - rax: exception number
 
     pushaq
+
+    mov rax, [rsp + 120]
 
     cmp rax, 31
     jle .error
@@ -291,55 +320,42 @@ exception_handler:
 
     .done:
         popaq
+        add rsp, 16 ; cleanup vector and error code
         iretq
 
     .error:
+        mov rcx, [rsp+120]
         popaq
-        mov rsi, error_messages
-        mov rcx, rax
-        shl rcx, 5 ; 32 bytes per message
-        add rsi, rcx
-        call puts
         cli
     @@: hlt
         jmp @b
 
-puts:
+config_port:
 
 ; in:
-;   - rsi: string to print
+;   - di: port number
+;   - esi: 0 = disable, 1 = enable
 
-    mov al, [rsi]
-    test al, al
+    movzx eax, di
+    test esi, esi
     jz @f
-    out 0xE9, al
-    inc rsi
-    jmp puts
-@@: ret
 
+    btr [tss.io], eax ; allow
+    ret
+
+@@: bts [tss.io], eax ; deny
+    ret
+
+IDT_STUB_MASK = (1 shl 8) or (1 shl 10) or (1 shl 11) or (1 shl 12) or (1 shl 13) or (1 shl 14) or (1 shl 17) or (1 shl 21)
 idt_stubs:
 rept 256 n:0 {
     align 16
     .stub#n:
-        if n = 8
-            pop rbx
-        else if n = 10
-            pop rbx
-        else if n = 11
-            pop rbx
-        else if n = 12
-            pop rbx
-        else if n = 13
-            pop rbx
-        else if n = 14
-            pop rbx
-        else if n = 17
-            pop rbx
-        else if n = 21
-            pop rbx
+        if (IDT_STUB_MASK shr n) and 1 = 0
+            push 0
         end if
 
-        mov rax, n
+        push n
         jmp exception_handler
 }
 
@@ -347,6 +363,7 @@ irqs: times 256 dq @f
 syscalls: times 256 dq @f
 @@: ret
 
+include "include/syscalls.inc"
 include "include/ata.inc"
 include "include/elf64.inc"
 include "include/fat16.inc"
@@ -356,7 +373,7 @@ initapic_out: mk8.3 "INITAPIC", "OUT"
 initbga_out: mk8.3 "INITBGA", "OUT"
 keyhndlr_out: mk8.3 "KEYHNDLR", "OUT"
 tmrhndlr_out: mk8.3 "TMRHNDLR", "OUT"
-hello_out: mk8.3 "HELLO", "OUT"
+init_out: mk8.3 "INIT", "OUT"
 
 align 4096
 pml4:
@@ -378,7 +395,7 @@ pd0:
 
 align 4096
 pd3:
-    rept 512 n:0 {
+rept 512 n:0 {
         dq (0xC0000000 + (n * 0x200000)) or 0x87
     }
 
@@ -386,17 +403,23 @@ align 16
 idt:
     rept 256 n:0 {
     .idt_entry#n:
-        dw ((idt_stubs.stub#n) and 0xFFFF) ; isr low
-        dw 0x10 ; cs
-        db 0 ; ist
         if n = 0x80
-            db 0xEE ; dpl 3 for syscall
+            dw (syscall_handler and 0xFFFF)
+            dw 0x10
+            db 0
+            db 0xEE ; dpl3 for syscall gate
+            dw ((syscall_handler shr 16) and 0xFFFF)
+            dd ((syscall_handler shr 32) and 0xFFFFFFFF)
+            dd 0
         else
+            dw ((idt_stubs.stub#n) and 0xFFFF)
+            dw 0x10
+            db 0
             db 0x8E ; interrupt gate
+            dw ((idt_stubs.stub#n shr 16) and 0xFFFF)
+            dd ((idt_stubs.stub#n shr 32) and 0xFFFFFFFF)
+            dd 0
         end if
-        dw ((idt_stubs.stub#n shr 16) and 0xFFFF) ; isr mid
-        dd ((idt_stubs.stub#n shr 32) and 0xFFFFFFFF) ; isr high
-        dd 0 ; reserved
     }
 idtr:
     .limit: dw $ - idt - 1
@@ -410,7 +433,7 @@ gdt:
     .user_ds: dq 0x00CFF2000000FFFF ; user ds
     .user_cs: dq 0x00AFFA000000FFFF ; user cs
 gdt_tss:
-    .limit: dw 103
+    .limit: dw (tss.end-tss-1)
     .base_low: dw 0
     .base_mid: db 0
     .flags: db 0x89
@@ -422,57 +445,8 @@ gdtr:
     .limit: dw $ - gdt - 1
     .base: dq gdt
 
-error_messages:
-@@: db "Divide by zero", 0
-    times 32-($ - @b) db 0
-@@: db "Debug", 0
-    times 32-($ - @b) db 0
-@@: db "Non-maskable interrupt", 0
-    times 32-($ - @b) db 0
-@@: db "Breakpoint", 0
-    times 32-($ - @b) db 0
-@@: db "Overflow", 0
-    times 32-($ - @b) db 0
-@@: db "Bound range exceeded", 0
-    times 32-($ - @b) db 0
-@@: db "Invalid opcode", 0
-    times 32-($ - @b) db 0
-@@: db "Device not available", 0
-    times 32-($ - @b) db 0
-@@: db "Double fault", 0
-    times 32-($ - @b) db 0
-@@: db "Coprocessor segment overrun", 0
-    times 32-($ - @b) db 0
-@@: db "Invalid TSS", 0
-    times 32-($ - @b) db 0
-@@: db "Segment not present", 0
-    times 32-($ - @b) db 0
-@@: db "Stack-segment fault", 0
-    times 32-($ - @b) db 0
-@@: db "General protection fault", 0
-    times 32-($ - @b) db 0
-@@: db "Page fault", 0
-    times 32-($ - @b) db 0
-@@: db "Reserved", 0
-    times 32-($ - @b) db 0
-@@: db "x87 floating-point exception", 0
-    times 32-($ - @b) db 0
-@@: db "Alignment check", 0
-    times 32-($ - @b) db 0
-@@: db "Machine check", 0
-    times 32-($ - @b) db 0
-@@: db "SIMD floating-point exception", 0
-    times 32-($ - @b) db 0
-@@: db "Virtualization exception", 0
-    times 32-($ - @b) db 0
-@@: db "Control protection exception", 0
-    times 32-($ - @b) db 0
-
 segment readable writable
 lapic: dq 0
-
-exit.stack: dq 0
-exit.rip: dq 0
 
 align 16
 tss:
@@ -484,12 +458,16 @@ tss:
     .ist: times 7 dq 0
     .reserved3: dq 0
     .reserved4: dw 0
-    .base: dw 104
+    .base: dw tss.io-tss
+    .io: times 8192+1 db 0xFF
+    .end:
 
 align 16
-rb 16384
-user_stack:
+user_stack: rb 16384
+sys_stack: rb 16384
+exit_stack: times 256 dq 0
 
-align 16
-rb 16384
-sys_stack:
+stacks:
+    .user: dq user_stack+16384
+    .sys:  dq sys_stack+16384
+    .exit: dq exit_stack

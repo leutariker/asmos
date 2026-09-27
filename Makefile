@@ -1,6 +1,6 @@
 OUT=boot.img
 SYS=stage1.out stage2.out stage3.out
-PROGS=initapic.out hello.out initbga.out keyhndlr.out tmrhndlr.out
+PROGS=initapic.out hello.out initbga.out keyhndlr.out tmrhndlr.out init.out
 INCLUDE=$(wildcard include/*.inc)
 
 all: boot.img
