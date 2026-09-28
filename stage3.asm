@@ -89,8 +89,11 @@ start:
     mov fs, ax
 
     ; set up new stack
-    mov rsp, [stacks.sys]
+    mov rsp, stack_top
     mov rbp, rsp
+
+    ; set tss rsp0
+    mov qword [tss.rsp0], rsp
 
     ; link tss
     mov rax, tss
@@ -101,10 +104,6 @@ start:
     mov [gdt_tss.base_high], al
     shr rax, 8
     mov [gdt_tss.base_upper], eax
-
-    ; set tss rsp0
-    mov rax, [stacks.sys]
-    mov qword [tss.rsp0], rax
 
     ; load tss
     mov ax, 0x28
@@ -137,11 +136,10 @@ start:
     call load_binary
     mov qword [irqs+(0x20*8)], rdx
 
-    ; init exit syscall
+    ; init syscalls
     mov qword [syscalls+(SYSCALL_EXIT*8)], exit
-
-    ; init run syscall
     mov qword [syscalls+(SYSCALL_RUN*8)], run
+    mov qword [syscalls + (SYSCALL_MALLOC * 8)], malloc
 
     ; allow 0xE9 for debug output in init
     mov di, 0xE9
@@ -167,12 +165,21 @@ exec:
 ; in:
 ;   - rdx: entry point
 
-    mov [stacks.exit], rsp ; save rsp
-    mov [tss.rsp0], rsp ; upodate tss rsp0
+    push rbp
+    mov [exit.stack], rsp ; save exit stack
 
-    ; alloc 4k for child proc
-    mov rbx, [stacks.user]
-    sub qword [stacks.user], 0x1000
+    mov [tss.rsp0], rsp ; set tss rsp0 to exit stack
+
+    ; alloc 16k user stack
+    mov rcx, 0x4000
+    mov rax, SYSCALL_MALLOC
+    int 0x80
+    test rax, rax
+    jz @f
+
+    ; point rbx to top of user stack
+    add rax, 0x4000
+    mov rbx, rax
 
     push 0x1B ; ss
     push rbx ; rsp
@@ -188,6 +195,8 @@ exec:
 
     iretq
 
+@@: ret
+
 load_binary:
 
 ; in:
@@ -198,6 +207,15 @@ load_binary:
 
     push rax
     push rbx
+    push rcx
+
+    ; alloc 64k
+    mov rcx, 0x10000
+    mov rax, SYSCALL_MALLOC
+    int 0x80
+    test rax, rax
+    jz .error
+    mov rbx, rax
 
     ; read file into scratch
     mov rdi, 0x80000
@@ -206,7 +224,6 @@ load_binary:
 
     ; reloc elf binary into memory
     mov rax, 0x80000
-    mov rbx, [.load_ptr]
     call elf64_load_file
     jc .error
 
@@ -219,6 +236,7 @@ load_binary:
     and rax, -0x10000
     mov [.load_ptr], rax
 
+    pop rcx
     pop rbx
     pop rax
 
@@ -226,6 +244,7 @@ load_binary:
     ret
 
     .error:
+        pop rcx
         pop rbx
         pop rax
         stc
@@ -244,7 +263,42 @@ run:
 @@: ret
 
 exit:
-    mov rsp, [stacks.exit] ; restore rsp
+    mov rsp, [.stack] ; restore rsp
+    pop rbp
+    ret
+    .stack: dq 0
+
+malloc:
+
+; in:
+;   - rcx: number of bytes to alloc
+; out:
+;   - rax: ptr to alloced memory (0=fail)
+
+    test rcx, rcx
+    jz @f
+
+    ; align heap top by 16
+    mov r8, [heap_top]
+    add r8, 15
+    and r8, -16
+
+    ; calc new top
+    lea r9, [r8 + rcx]
+    jc @f
+
+    ; enforce 1gig heap limit
+    mov rax, 0x40000000
+    cmp r9, rax
+    jae @f
+
+    ; commit allocation
+    mov [heap_top], r9
+    mov rax, r8
+    ret
+
+    ; error
+@@: xor rax, rax
     ret
 
 syscall_handler:
@@ -446,6 +500,7 @@ gdtr:
     .base: dq gdt
 
 segment readable writable
+heap_top: dq 0x6400000 ; 100mib
 lapic: dq 0
 
 align 16
@@ -463,11 +518,5 @@ tss:
     .end:
 
 align 16
-user_stack: rb 16384
-sys_stack: rb 16384
-exit_stack: times 256 dq 0
-
-stacks:
-    .user: dq user_stack+16384
-    .sys:  dq sys_stack+16384
-    .exit: dq exit_stack
+rb 16384
+stack_top:
