@@ -2,3 +2,4 @@
 *.elf
 *.binary
 *.img
+qemu.log

@@ -15,7 +15,7 @@ run: $(OUT)
 	qemu-system-x86_64 -hda $(OUT) -no-reboot -debugcon stdio
 
 debug: $(OUT)
-	qemu-system-x86_64 -hda $(OUT) -no-reboot -debugcon stdio -d int,cpu_reset
+	qemu-system-x86_64 -hda $(OUT) -no-reboot -debugcon stdio -d cpu_reset,int -D qemu.log
 
 clean:
 	rm -f $(SYS) $(PROGS) $(OUT)
