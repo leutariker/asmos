@@ -167,7 +167,6 @@ exec:
 
     push rbp
     mov [exit.stack], rsp ; save exit stack
-
     mov [tss.rsp0], rsp ; set tss rsp0 to exit stack
 
     ; alloc 16k user stack
@@ -222,7 +221,7 @@ load_binary:
     call fat16_read_file
     jc .error
 
-    ; reloc elf binary into memory
+    ; reloc elf binary from scratch (rax) into allocated memory (rbx)
     mov rax, 0x80000
     call elf64_load_file
     jc .error
@@ -230,16 +229,9 @@ load_binary:
     ; rdx = entry point
     mov rdx, rax
 
-    ; align exec ptr to next 64kb boundary
-    mov rax, [.load_ptr]
-    add rax, 0x10000
-    and rax, -0x10000
-    mov [.load_ptr], rax
-
     pop rcx
     pop rbx
     pop rax
-
     clc
     ret
 
@@ -249,8 +241,6 @@ load_binary:
         pop rax
         stc
         ret
-
-    .load_ptr: dq 0x200000
 
 run:
 
@@ -317,6 +307,7 @@ syscall_handler:
     cmp rax, 0xFF
     jae @f
 
+    ; find syscall handler
     mov r11, [syscalls+(rax*8)]
     test r11, r11
     jz @f
@@ -361,6 +352,7 @@ exception_handler:
     cmp rax, 255
     je .done ; spurious
 
+    ; find irq handler
     mov rbx, [irqs + rax*8]
     test rbx, rbx
     jz .eoi
@@ -400,12 +392,18 @@ config_port:
 @@: bts [tss.io], eax ; deny
     ret
 
-IDT_STUB_MASK = (1 shl 8) or (1 shl 10) or (1 shl 11) or (1 shl 12) or (1 shl 13) or (1 shl 14) or (1 shl 17) or (1 shl 21)
 idt_stubs:
 rept 256 n:0 {
     align 16
     .stub#n:
-        if (IDT_STUB_MASK shr n) and 1 = 0
+        if (((1 shl 8) or\
+             (1 shl 10) or\
+             (1 shl 11) or\
+             (1 shl 12) or\
+             (1 shl 13) or\
+             (1 shl 14) or\
+             (1 shl 17) or\
+             (1 shl 21)) shr n) and 1 = 0
             push 0
         end if
 
