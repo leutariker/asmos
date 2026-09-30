@@ -1,40 +1,40 @@
-IS_X64=1 ; for include/
-
 macro pushaq {
-    push rax
-    push rbx
-    push rcx
-    push rdx
-    push rsi
-    push rdi
-    push rbp
-    push r8
-    push r9
-    push r10
-    push r11
-    push r12
-    push r13
-    push r14
     push r15
+    push r14
+    push r13
+    push r12
+    push r11
+    push r10
+    push r9
+    push r8
+    push rbp
+    push rdi
+    push rsi
+    push rdx
+    push rcx
+    push rbx
+    push rax
 }
 
 macro popaq {
-    pop r15
-    pop r14
-    pop r13
-    pop r12
-    pop r11
-    pop r10
-    pop r9
-    pop r8
-    pop rbp
-    pop rdi
-    pop rsi
-    pop rdx
-    pop rcx
-    pop rbx
     pop rax
+    pop rbx
+    pop rcx
+    pop rdx
+    pop rsi
+    pop rdi
+    pop rbp
+    pop r8
+    pop r9
+    pop r10
+    pop r11
+    pop r12
+    pop r13
+    pop r14
+    pop r15
 }
+
+IS_X64=1 ; for include/
 
 format elf64 executable 3 at 0x100000
 use32
@@ -112,6 +112,11 @@ start:
     ; load idt
     lidt [idtr]
 
+    ; init syscalls
+    mov qword [syscalls+(SYSCALL_EXIT*8)], exit
+    mov qword [syscalls+(SYSCALL_RUN*8)], run
+    mov qword [syscalls + (SYSCALL_MALLOC * 8)], malloc
+
     ; load apic code into memory and init
     mov rsi, initapic_out
     call load_binary
@@ -136,10 +141,8 @@ start:
     call load_binary
     mov qword [irqs+(0x20*8)], rdx
 
-    ; init syscalls
-    mov qword [syscalls+(SYSCALL_EXIT*8)], exit
-    mov qword [syscalls+(SYSCALL_RUN*8)], run
-    mov qword [syscalls + (SYSCALL_MALLOC * 8)], malloc
+    ; enable interrupts
+    sti
 
     ; allow 0xE9 for debug output in init
     mov di, 0xE9
@@ -156,9 +159,8 @@ start:
     mov esi, 0
     call config_port
 
-    sti
-@@: hlt
-    jmp @b
+    ; poll
+    jmp $
 
 exec:
 
@@ -182,7 +184,10 @@ exec:
 
     push 0x1B ; ss
     push rbx ; rsp
-    pushf ; flags
+    pushf
+    pop rax
+    or rax, 0x200 ; enable interrupts
+    push rax ; flags
     push 0x23 ; cs
     push rdx ; rip
 
@@ -204,7 +209,6 @@ load_binary:
 ;   - cf: set if error
 ;   - rdx: entry point of loaded binary
 
-    push rax
     push rbx
     push rcx
 
@@ -214,7 +218,8 @@ load_binary:
     int 0x80
     test rax, rax
     jz .error
-    mov rbx, rax
+    
+    push rax ; save load ptr
 
     ; read file into scratch
     mov rdi, 0x80000
@@ -222,6 +227,7 @@ load_binary:
     jc .error
 
     ; reloc elf binary from scratch (rax) into allocated memory (rbx)
+    pop rbx
     mov rax, 0x80000
     call elf64_load_file
     jc .error
@@ -231,14 +237,12 @@ load_binary:
 
     pop rcx
     pop rbx
-    pop rax
     clc
     ret
 
     .error:
         pop rcx
         pop rbx
-        pop rax
         stc
         ret
 
@@ -277,7 +281,7 @@ malloc:
     lea r9, [r8 + rcx]
     jc @f
 
-    ; enforce 1gig heap limit
+    ; enforce heap limit
     mov rax, 0x40000000
     cmp r9, rax
     jae @f
@@ -292,33 +296,45 @@ malloc:
     ret
 
 syscall_handler:
-
-; in:
-;   - rax: syscall number
-
     pushaq
 
-    push rax
     mov ax, 0x08
     mov ds, ax
     mov es, ax
-    pop rax
 
+    mov rax, [rsp + 0]
     cmp rax, 0xFF
-    jae @f
+    jae .restore
 
-    ; find syscall handler
-    mov r11, [syscalls+(rax*8)]
+    mov r11, [syscalls + (rax * 8)]
     test r11, r11
-    jz @f
-    call r11
-    mov [rsp + 112], rax
-    @@:
+    jz .restore
 
-    ; check dpl of cs to see if we are returning to ring0 or ring3
-    mov ax, [rsp + 128]
+    mov rax, [rsp + 0]
+    mov rbx, [rsp + 8]
+    mov rcx, [rsp + 16]
+    mov rdx, [rsp + 24]
+    mov rsi, [rsp + 32]
+    mov rdi, [rsp + 40]
+
+    call r11 ; call syscall handler
+
+    mov [rsp + 0], rax
+    mov [rsp + 8], rbx 
+    mov [rsp + 16], rcx
+    mov [rsp + 24], rdx
+    mov [rsp + 32], rsi
+    mov [rsp + 40], rdi
+
+    ; check whether to return to ring3 or ring0
+@@: mov ax, [rsp + 128] ; +128 = cs
     and ax, 3
     jz .ring0
+
+    .restore:
+        mov ax, [rsp + 128] ; +128 = cs
+        and ax, 3
+        jz .ring0
 
     .ring3:
         mov ax, 0x1B
@@ -411,6 +427,7 @@ rept 256 n:0 {
         jmp exception_handler
 }
 
+align 8
 irqs: times 256 dq @f
 syscalls: times 256 dq @f
 @@: ret
@@ -459,7 +476,7 @@ idt:
             dw (syscall_handler and 0xFFFF)
             dw 0x10
             db 0
-            db 0xEE ; dpl3 for syscall gate
+            db 0xEF ; dpl3 for syscall gate
             dw ((syscall_handler shr 16) and 0xFFFF)
             dd ((syscall_handler shr 32) and 0xFFFFFFFF)
             dd 0
@@ -467,7 +484,7 @@ idt:
             dw ((idt_stubs.stub#n) and 0xFFFF)
             dw 0x10
             db 0
-            db 0x8E ; interrupt gate
+            db 0xEE ; interrupt gate
             dw ((idt_stubs.stub#n shr 16) and 0xFFFF)
             dd ((idt_stubs.stub#n shr 32) and 0xFFFFFFFF)
             dd 0
@@ -498,7 +515,7 @@ gdtr:
     .base: dq gdt
 
 segment readable writable
-heap_top: dq 0x6400000 ; 100mib
+heap_top: dq 0x6400000
 lapic: dq 0
 
 align 16
