@@ -1,3 +1,7 @@
+;;;;;;;;;;;;
+;; MACROS ;;
+;;;;;;;;;;;;
+
 macro pushaq {
     push r15
     push r14
@@ -33,6 +37,10 @@ macro popaq {
     pop r14
     pop r15
 }
+
+;;;;;;;;;;
+;; MAIN ;;
+;;;;;;;;;;
 
 IS_X64=1 ; for include/
 
@@ -112,34 +120,30 @@ start:
     ; load idt
     lidt [idtr]
 
+    ; init irqs
+    mov qword [irqs + (0x20 * 8)], timer_handler
+    mov qword [irqs + (0x21 * 8)], keyboard_handler
+
     ; init syscalls
-    mov qword [syscalls+(SYSCALL_EXIT*8)], exit
-    mov qword [syscalls+(SYSCALL_RUN*8)], run
+    mov qword [syscalls + (SYSCALL_EXIT*8)], exit
+    mov qword [syscalls + (SYSCALL_RUN*8)], run
     mov qword [syscalls + (SYSCALL_MALLOC * 8)], malloc
+    mov qword [syscalls + (SYSCALL_FREE * 8)], free
+    mov qword [syscalls + (SYSCALL_GETC * 8)], getc
 
     ; load apic code into memory and init
-    mov rsi, initapic_out
+    mov rsi, apic_out
     call load_binary
     lea rax, [lapic] ; pass ptr of apic base address
     call rdx
 
     ; load bga code into memory and init
-    mov rsi, initbga_out
+    mov rsi, bga_out
     call load_binary
     mov rax, 1024
     mov rbx, 768
     mov rcx, 32
     call rdx
-
-    ; load keyboard handler into memory and wire irq
-    mov rsi, keyhndlr_out
-    call load_binary
-    mov qword [irqs+(0x21*8)], rdx
-
-    ; load timer handler into memory and wire irq
-    mov rsi, tmrhndlr_out
-    call load_binary
-    mov qword [irqs+(0x20*8)], rdx
 
     ; enable interrupts
     sti
@@ -149,8 +153,8 @@ start:
     mov esi, 1
     call config_port
 
-    ; run init
-    mov rsi, init_out
+    ; run cmd
+    mov rsi, cmd_out
     mov rax, SYSCALL_RUN
     int 0x80
 
@@ -161,6 +165,10 @@ start:
 
     ; poll
     jmp $
+
+;;;;;;;;;;;;;;;;;;;;;;
+;; SYSTEM FUNCTIONS ;;
+;;;;;;;;;;;;;;;;;;;;;;
 
 exec:
 
@@ -295,6 +303,62 @@ malloc:
 @@: xor rax, rax
     ret
 
+free:
+    ret
+
+getc:
+
+; out:
+;   - al: scancode (0 if none available)
+
+    push rbx
+    push rsi
+
+    mov rbx, [scancodes.write_ptr]
+    mov rsi, [scancodes.read_ptr]
+    cmp rsi, rbx ; check if buffer is empty 
+    je .empty
+
+    mov al, [rsi]
+    inc rsi ; advance read pointer
+
+    ; wrap around
+    cmp rsi, scancodes.buf + 256
+    jb @f
+    mov rsi, scancodes.buf
+
+@@: mov [scancodes.read_ptr], rsi ; save read ptr
+    jmp .done
+
+    .empty:
+        xor al, al
+
+    .done:
+        pop rsi
+        pop rbx
+        ret
+
+;;;;;;;;;;;;;;
+;; HANDLERS ;;
+;;;;;;;;;;;;;;
+
+keyboard_handler:
+    in al, 0x60
+    mov rbx, [scancodes.read_ptr]
+    mov [rbx], al
+    inc rbx
+
+    ; wrap around write pointer
+    cmp rbx, scancodes.buf + 256
+    jb @f
+    mov rbx, scancodes.buf
+
+@@: mov [scancodes.write_ptr], rbx
+    ret
+
+timer_handler:
+    ret
+
 syscall_handler:
     pushaq
 
@@ -392,6 +456,10 @@ exception_handler:
     @@: hlt
         jmp @b
 
+;;;;;;;;;;;;;;;
+;; FUNCTIONS ;;
+;;;;;;;;;;;;;;;
+
 config_port:
 
 ; in:
@@ -407,6 +475,10 @@ config_port:
 
 @@: bts [tss.io], eax ; deny
     ret
+
+;;;;;;;;;;;;;;;;;;;
+;; EXECABLE DATA ;;
+;;;;;;;;;;;;;;;;;;;
 
 idt_stubs:
 rept 256 n:0 {
@@ -437,12 +509,14 @@ include "include/ata.inc"
 include "include/elf64.inc"
 include "include/fat16.inc"
 
+;;;;;;;;;;;;;;;;;;;
+;; READABLE DATA ;;
+;;;;;;;;;;;;;;;;;;;
+
 segment readable
-initapic_out: mk8.3 "INITAPIC", "OUT"
-initbga_out: mk8.3 "INITBGA", "OUT"
-keyhndlr_out: mk8.3 "KEYHNDLR", "OUT"
-tmrhndlr_out: mk8.3 "TMRHNDLR", "OUT"
-init_out: mk8.3 "INIT", "OUT"
+apic_out: mk8.3 "APIC", "OUT"
+bga_out: mk8.3 "BGA", "OUT"
+cmd_out: mk8.3 "CMD", "OUT"
 
 align 4096
 pml4:
@@ -514,9 +588,18 @@ gdtr:
     .limit: dw $ - gdt - 1
     .base: dq gdt
 
+;;;;;;;;;;;;;;;;;;;
+;; WRITABLE DATA ;;
+;;;;;;;;;;;;;;;;;;;
+
 segment readable writable
 heap_top: dq 0x6400000
 lapic: dq 0
+
+scancodes:
+    .buf: times 256 db 0
+    .read_ptr: dq scancodes.buf
+    .write_ptr: dq scancodes.buf
 
 align 16
 tss:

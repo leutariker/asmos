@@ -1,18 +1,16 @@
 format elf64 executable 3 at 0x1000
-use64
-entry start
+include "include/crt0.inc"
 segment readable executable writable
 
-start:
-    in al, 0x60
-    call scan2ascii
-
+main:
+    mov rax, SYSCALL_GETC
+    int 0x80
     test al, al
-    jz @f
-
+    jz main
+    call scan2ascii
     out 0xE9, al
-
-@@: ret
+    jmp main
+    ret
 
 scan2ascii:
 
@@ -89,6 +87,9 @@ scan2ascii:
 
     .shift: db 0
     .extended: db 0
+
+segment readable
+include "include/syscalls.inc"
 
 scancodes:
     db  0, 27, '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '=', 8, 9
