@@ -2,6 +2,18 @@
 ;; TABLES ;;
 ;;;;;;;;;;;;
 
+PROC_CR3=0
+PROC_HEAP=PROC_CR3+8
+PROC_KRSP=PROC_HEAP+8
+PROC_RSP0=PROC_KRSP+8
+PROC_STATE=PROC_RSP0+8
+PROC_SIZE=PROC_STATE+8
+PROCS_MAX=64
+
+PROC_DEAD=0
+PROC_ALIVE=1
+PROC_READY=2
+
 SYSCALL_EXIT = 0
 SYSCALL_RUN = 1
 SYSCALL_MALLOC = 2
@@ -367,6 +379,7 @@ keyboard_handler:
     ret
 
 timer_handler:
+    call schedule
     ret
 
 syscall_handler:
@@ -469,6 +482,49 @@ exception_handler:
 ;;;;;;;;;;;;;;;
 ;; FUNCTIONS ;;
 ;;;;;;;;;;;;;;;
+
+schedule:
+
+; out:
+;   - rax: pointer to next ready proc
+
+    push rbx
+    push rcx
+    push rdx
+    push rsi
+
+    ; start at current+1 and go through all entries
+    mov rax, [procs.current]
+    mov ecx, PROCS_MAX
+
+    .next:
+        ; advance and wrap around
+        inc rax
+        cmp rax, PROCS_MAX
+        jb @f
+        xor eax, eax
+
+        ; check if entry is ready
+@@:     imul rdx, rax, PROC_SIZE
+        lea rbx, [procs.entries + rdx]
+        cmp qword [rbx + PROC_STATE], PROC_READY
+        je .found
+        loop .next
+
+    mov rax, -1 ; no entry found
+    jmp .done
+
+    .found:
+        mov [procs.current], rax
+        mov rax, rbx
+
+    .done:
+        ; Restore scratch registers before returning the selected pointer.
+        pop rsi
+        pop rdx
+        pop rcx
+        pop rbx
+        ret
 
 config_port:
 
@@ -602,6 +658,10 @@ gdtr:
 ;;;;;;;;;;;;;;;;;;;
 
 segment readable writable
+align 16
+procs:
+    .current: dq -1 ; index of the last selected process
+    .entries: rb (PROC_SIZE*PROCS_MAX)
 heap_top: dq 0x6400000
 lapic: dq 0
 
