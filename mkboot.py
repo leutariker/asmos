@@ -4,29 +4,15 @@ import struct
 import sys
 from pathlib import Path
 
-# 1.44mb floppy:
-#   1 reserved sector
-#   9 sectors fat #1
-#   9 sectors fat #2
-#   14 sectors root directory
-#   2847 data sectors
-
-IMAGE_SIZE = 1474560
 SECTOR_SIZE = 512
-TOTAL_SECTORS = IMAGE_SIZE // SECTOR_SIZE
 RESERVED_SECTORS = 1
 NUM_FATS = 2
 ROOT_ENTRIES = 224
 SECTORS_PER_CLUSTER = 1
-FAT_SIZE = 9
+
 ROOT_DIR_SECTORS = (
     ROOT_ENTRIES * 32 + SECTOR_SIZE - 1
 ) // SECTOR_SIZE
-DATA_START_SECTOR = (
-    RESERVED_SECTORS
-    + NUM_FATS * FAT_SIZE
-    + ROOT_DIR_SECTORS
-)
 
 def write_sector(image, lba, data):
     if len(data) > SECTOR_SIZE:
@@ -132,6 +118,11 @@ def add_root_entry(image, index, filename, first_cluster, file_size):
 
 
 def main():
+    global FAT_SIZE
+    global DATA_START_SECTOR
+    global TOTAL_SECTORS
+    global IMAGE_SIZE
+
     if len(sys.argv) < 4:
         print(
             f"usage: {sys.argv[0]} "
@@ -144,6 +135,33 @@ def main():
 
     # grab everything between the first and last arguments
     payload_paths = [Path(p) for p in sys.argv[2:-1]]
+
+    cluster_size = SECTOR_SIZE * SECTORS_PER_CLUSTER
+    required_clusters = sum(
+        max(1, (path.stat().st_size + cluster_size - 1) // cluster_size)
+        for path in payload_paths
+    )
+
+    # fat16 needs at least 4085 data clusters
+    cluster_count = max(4085, required_clusters)
+
+    # calculate the fat size from the number of clusters
+    FAT_SIZE = (
+        (cluster_count + 2) * 2 + SECTOR_SIZE - 1
+    ) // SECTOR_SIZE
+
+    DATA_START_SECTOR = (
+        RESERVED_SECTORS
+        + NUM_FATS * FAT_SIZE
+        + ROOT_DIR_SECTORS
+    )
+
+    TOTAL_SECTORS = (
+        DATA_START_SECTOR
+        + cluster_count * SECTORS_PER_CLUSTER
+    )
+
+    IMAGE_SIZE = TOTAL_SECTORS * SECTOR_SIZE
 
     bootsector = bootsector_path.read_bytes()
 
@@ -189,8 +207,8 @@ def main():
         TOTAL_SECTORS,
     )
 
-    # media descriptor: 0xf0 = floppy
-    bpb[21] = 0xf0
+    # media descriptor: 0xf8 = fixed disk
+    bpb[21] = 0xf8
 
     # sectors per fat
     struct.pack_into(
@@ -288,6 +306,12 @@ def main():
 
     current_cluster = 2
     files = []
+
+    if cluster_count > 65524:
+        raise ValueError(
+            f"image requires {cluster_count} clusters, "
+            "which is too large for FAT16"
+        )
 
     # add all payload files to the image
     for idx, path in enumerate(payload_paths):
