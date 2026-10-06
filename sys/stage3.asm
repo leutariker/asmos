@@ -9,6 +9,7 @@ SYSCALL_RUN = 1
 SYSCALL_MALLOC = 2
 SYSCALL_FREE = 3
 SYSCALL_POLL = 4
+SYSCALL_READ = 5
 
 PROCESS_CR3=0
 PROCESS_HEAP=PROCESS_CR3+8
@@ -154,12 +155,13 @@ start:
     mov qword [irqs + (0x20 * 8)], timer_handler
     mov qword [irqs + (0x21 * 8)], keyboard_handler
 
-    ; init syscalls
+    ; register syscalls
     mov qword [syscalls + (SYSCALL_EXIT*8)], exit
     mov qword [syscalls + (SYSCALL_RUN*8)], run
     mov qword [syscalls + (SYSCALL_MALLOC * 8)], malloc
     mov qword [syscalls + (SYSCALL_FREE * 8)], free
     mov qword [syscalls + (SYSCALL_POLL * 8)], poll
+    mov qword [syscalls + (SYSCALL_READ * 8)], read
 
     ; register boot context as process 0
     mov qword [processes.current], 0
@@ -269,6 +271,37 @@ poll:
     xor eax, eax
     xchg [r10 + PROCESS_FLAGS], rax
     ret
+
+read:
+
+; in:
+;   - rsi: filename to read
+; out:
+;   - out: ptr to read data (0 on error)
+
+    push rcx
+
+    ; alloc 64k
+    mov rcx, 0x10000
+    mov rax, SYSCALL_MALLOC
+    int 0x80
+    test rax, rax
+    jz .error
+    mov rdi, rax
+    push rax
+
+    ; read file into alloced memory
+    call fat16_read_file
+    jc .error
+
+    pop rax
+    pop rcx
+    ret
+
+    .error:
+        pop rcx
+        xor rax, rax
+        ret
 
 ;;;;;;;;;;;;;;
 ;; HANDLERS ;;

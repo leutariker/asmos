@@ -1,11 +1,12 @@
 OUT=boot.img
-SYS=stage1.out stage2.out stage3.out
-PROGS=apic.out bga.out cmd.out test.out
+SYS=sys/stage1.out sys/stage2.out sys/stage3.out
+DRIVERS=drivers/apic.out drivers/bga.out
+PROGS=progs/cmd.out progs/test.out
 INCLUDE=$(wildcard include/*.inc)
 
 all: boot.img
 
-$(OUT): mkboot.py $(SYS) $(PROGS)
+$(OUT): mkboot.py $(SYS) $(DRIVERS) $(PROGS) README.txt
 	python3 $^ $@
 
 %.out: %.asm $(INCLUDE)
@@ -18,6 +19,6 @@ debug: $(OUT)
 	qemu-system-x86_64 -hda $(OUT) -no-reboot -debugcon stdio -d cpu_reset,int -D qemu.log
 
 clean:
-	rm -f $(SYS) $(PROGS) $(OUT)
+	rm -f $(SYS) $(DRIVERS) $(PROGS) $(OUT)
 
 .PHONY: all run clean
