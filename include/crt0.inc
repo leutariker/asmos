@@ -1,10 +1,9 @@
-include "include/syscalls.inc"
 use64
 entry start
 
 start:
     call main
-    mov rax, SYSCALL_EXIT
+    mov rax, 0 ; exit syscall
     int 0x80
 @@: hlt
     jmp @b

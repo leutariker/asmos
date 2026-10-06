@@ -3,7 +3,7 @@ include "include/crt0.inc"
 segment readable executable writable
 
 main:
-    mov rax, SYSCALL_GETC
+    mov rax, 4 ; getc syscall
     int 0x80
     test al, al
     jz main
@@ -89,8 +89,6 @@ scan2ascii:
     .extended: db 0
 
 segment readable
-include "include/syscalls.inc"
-
 scancodes:
     db  0, 27, '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '=', 8, 9
     db 'q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p', '[', ']', 13, 0, 'a', 's'

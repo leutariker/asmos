@@ -1,4 +1,14 @@
 ;;;;;;;;;;;;
+;; TABLES ;;
+;;;;;;;;;;;;
+
+SYSCALL_EXIT = 0
+SYSCALL_RUN = 1
+SYSCALL_MALLOC = 2
+SYSCALL_FREE = 3
+SYSCALL_GETC = 4
+
+;;;;;;;;;;;;
 ;; MACROS ;;
 ;;;;;;;;;;;;
 
@@ -504,7 +514,6 @@ irqs: times 256 dq @f
 syscalls: times 256 dq @f
 @@: ret
 
-include "include/syscalls.inc"
 include "include/ata.inc"
 include "include/elf64.inc"
 include "include/fat16.inc"
