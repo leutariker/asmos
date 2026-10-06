@@ -2,23 +2,28 @@
 ;; TABLES ;;
 ;;;;;;;;;;;;
 
-PROC_CR3=0
-PROC_HEAP=PROC_CR3+8
-PROC_KRSP=PROC_HEAP+8
-PROC_RSP0=PROC_KRSP+8
-PROC_STATE=PROC_RSP0+8
-PROC_SIZE=PROC_STATE+8
-PROCS_MAX=64
-
-PROC_DEAD=0
-PROC_ALIVE=1
-PROC_READY=2
+HEAP_BASE=0x6400000
 
 SYSCALL_EXIT = 0
 SYSCALL_RUN = 1
 SYSCALL_MALLOC = 2
 SYSCALL_FREE = 3
 SYSCALL_GETC = 4
+
+PROC_CR3=0
+PROC_HEAP=PROC_CR3+8
+PROC_HEAPEND=PROC_HEAP+8
+PROC_KRSP=PROC_HEAPEND+8
+PROC_RSP0=PROC_KRSP+8
+PROC_STATE=PROC_RSP0+8
+
+PROC_SIZE=PROC_STATE+8
+PROC_HEAP_SIZE=0x800000
+PROCS_MAX=64
+
+PROC_DEAD=0
+PROC_ALIVE=1
+PROC_READY=2
 
 ;;;;;;;;;;;;
 ;; MACROS ;;
@@ -153,6 +158,15 @@ start:
     mov qword [syscalls + (SYSCALL_FREE * 8)], free
     mov qword [syscalls + (SYSCALL_GETC * 8)], getc
 
+    ; register boot context as proc 0
+    mov qword [procs.current], 0
+    mov rax, pml4
+    mov [procs.entries + PROC_CR3], rax
+    mov qword [procs.entries + PROC_HEAP], HEAP_BASE
+    mov qword [procs.entries + PROC_HEAPEND], HEAP_BASE + PROC_HEAP_SIZE
+    mov qword [procs.entries + PROC_RSP0], stack_top
+    mov qword [procs.entries + PROC_STATE], PROC_READY
+
     ; load apic code into memory and init
     mov rsi, apic_out
     call load_binary
@@ -180,101 +194,13 @@ start:
     mov rax, SYSCALL_RUN
     int 0x80
 
-    ; disable 0xE9
-    mov di, 0xE9
-    mov esi, 0
-    call config_port
-
-    ; poll
-    jmp $
+    ; idle (proc 0)
+@@: hlt
+    jmp @b
 
 ;;;;;;;;;;;;;;;;;;;;;;
 ;; SYSTEM FUNCTIONS ;;
 ;;;;;;;;;;;;;;;;;;;;;;
-
-exec:
-
-; in:
-;   - rdx: entry point
-
-    push rbp
-    mov [exit.stack], rsp ; save exit stack
-    mov [tss.rsp0], rsp ; set tss rsp0 to exit stack
-
-    ; alloc 16k user stack
-    mov rcx, 0x4000
-    mov rax, SYSCALL_MALLOC
-    int 0x80
-    test rax, rax
-    jz @f
-
-    ; point rbx to top of user stack
-    add rax, 0x4000
-    mov rbx, rax
-
-    push 0x1B ; ss
-    push rbx ; rsp
-    pushf
-    pop rax
-    or rax, 0x200 ; enable interrupts
-    push rax ; flags
-    push 0x23 ; cs
-    push rdx ; rip
-
-    mov ax, 0x1B
-    mov ds, ax
-    mov es, ax
-    mov fs, ax
-    mov gs, ax
-
-    iretq
-
-@@: ret
-
-load_binary:
-
-; in:
-;   - rsi: file name to load
-; out:
-;   - cf: set if error
-;   - rdx: entry point of loaded binary
-
-    push rbx
-    push rcx
-
-    ; alloc 64k
-    mov rcx, 0x10000
-    mov rax, SYSCALL_MALLOC
-    int 0x80
-    test rax, rax
-    jz .error
-    
-    push rax ; save load ptr
-
-    ; read file into scratch
-    mov rdi, 0x80000
-    call fat16_read_file
-    jc .error
-
-    ; reloc elf binary from scratch (rax) into allocated memory (rbx)
-    pop rbx
-    mov rax, 0x80000
-    call elf64_load_file
-    jc .error
-
-    ; rdx = entry point
-    mov rdx, rax
-
-    pop rcx
-    pop rbx
-    clc
-    ret
-
-    .error:
-        pop rcx
-        pop rbx
-        stc
-        ret
 
 run:
 
@@ -283,46 +209,43 @@ run:
 
     call load_binary
     jc @f
-    call exec
+    call mkproc
 @@: ret
 
 exit:
-    mov rsp, [.stack] ; restore rsp
-    pop rbp
-    ret
-    .stack: dq 0
+
+; in:
+;   - r10: current proc
+
+    cli
+    mov qword [r10 + PROC_STATE], PROC_DEAD
+    jmp switch_task
 
 malloc:
 
 ; in:
-;   - rcx: number of bytes to alloc
+;   - r10: proc to alloc from
+;   - rcx: bytes to alloc
 ; out:
-;   - rax: ptr to alloced memory (0=fail)
+;   - rax: 16-byte aligned ptr to alloced memory
 
     test rcx, rcx
     jz @f
 
-    ; align heap top by 16
-    mov r8, [heap_top]
+    mov r8, [r10 + PROC_HEAP]
     add r8, 15
-    and r8, -16
-
-    ; calc new top
-    lea r9, [r8 + rcx]
+    and r8, -16 ; r8 = aligned start
+    mov r9, r8
+    add r9, rcx ; r9 = new heap top
     jc @f
+    cmp r9, [r10 + PROC_HEAPEND]
+    ja @f
 
-    ; enforce heap limit
-    mov rax, 0x40000000
-    cmp r9, rax
-    jae @f
-
-    ; commit allocation
-    mov [heap_top], r9
+    mov [r10 + PROC_HEAP], r9
     mov rax, r8
     ret
 
-    ; error
-@@: xor rax, rax
+@@: xor eax, eax
     ret
 
 free:
@@ -331,7 +254,7 @@ free:
 getc:
 
 ; out:
-;   - al: scancode (0 if none available)
+;   - al: scancode
 
     push rbx
     push rsi
@@ -379,10 +302,13 @@ keyboard_handler:
     ret
 
 timer_handler:
-    call schedule
-    ret
+    jmp switch_task ; preempt on every tick
 
 syscall_handler:
+
+; in:
+;   - rax: syscall number
+
     pushaq
 
     mov ax, 0x08
@@ -397,27 +323,27 @@ syscall_handler:
     test r11, r11
     jz .restore
 
-    mov rax, [rsp + 0]
+    ; load args from the saved frame
     mov rbx, [rsp + 8]
     mov rcx, [rsp + 16]
     mov rdx, [rsp + 24]
     mov rsi, [rsp + 32]
     mov rdi, [rsp + 40]
 
-    call r11 ; call syscall handler
+    ; handlers get the caller's proc in r10
+    mov r10, [procs.current]
+    imul r10, r10, PROC_SIZE
+    add r10, procs.entries
+    call r11
 
     mov [rsp + 0], rax
-    mov [rsp + 8], rbx 
+    mov [rsp + 8], rbx
     mov [rsp + 16], rcx
     mov [rsp + 24], rdx
     mov [rsp + 32], rsi
     mov [rsp + 40], rdi
 
-    ; check whether to return to ring3 or ring0
-@@: mov ax, [rsp + 128] ; +128 = cs
-    and ax, 3
-    jz .ring0
-
+    ; return to ring3 or ring0 depending on the saved cs
     .restore:
         mov ax, [rsp + 128] ; +128 = cs
         and ax, 3
@@ -483,47 +409,52 @@ exception_handler:
 ;; FUNCTIONS ;;
 ;;;;;;;;;;;;;;;
 
+switch_task:
+    ; find next ready proc
+    mov r10, [procs.current]
+    imul r10, r10, PROC_SIZE
+    add r10, procs.entries
+    call schedule
+    cmp rax, -1
+    je @f
+    cmp rax, r10 ; same proc, nothing to do
+    je @f
+
+    ; switch task
+    mov [r10 + PROC_KRSP], rsp
+    mov rsp, [rax + PROC_KRSP]
+    mov rcx, [rax + PROC_CR3]
+    mov cr3, rcx
+    mov rcx, [rax + PROC_RSP0]
+    mov [tss.rsp0], rcx
+@@: ret
+
 schedule:
 
 ; out:
-;   - rax: pointer to next ready proc
+;   - rax: ptr to next ready proc
 
-    push rbx
-    push rcx
-    push rdx
-    push rsi
-
-    ; start at current+1 and go through all entries
-    mov rax, [procs.current]
-    mov ecx, PROCS_MAX
+    mov r8, [procs.current]
+    mov r9d, PROCS_MAX
 
     .next:
-        ; advance and wrap around
-        inc rax
-        cmp rax, PROCS_MAX
+        inc r8
+        cmp r8, PROCS_MAX
         jb @f
-        xor eax, eax
+        xor r8d, r8d ; wrap around
 
-        ; check if entry is ready
-@@:     imul rdx, rax, PROC_SIZE
-        lea rbx, [procs.entries + rdx]
-        cmp qword [rbx + PROC_STATE], PROC_READY
+@@:     imul rdx, r8, PROC_SIZE
+        lea rax, [procs.entries + rdx]
+        cmp qword [rax + PROC_STATE], PROC_READY
         je .found
-        loop .next
+        dec r9d
+        jnz .next
 
-    mov rax, -1 ; no entry found
-    jmp .done
+    mov rax, -1
+    ret
 
     .found:
-        mov [procs.current], rax
-        mov rax, rbx
-
-    .done:
-        ; Restore scratch registers before returning the selected pointer.
-        pop rsi
-        pop rdx
-        pop rcx
-        pop rbx
+        mov [procs.current], r8
         ret
 
 config_port:
@@ -541,6 +472,150 @@ config_port:
 
 @@: bts [tss.io], eax ; deny
     ret
+
+load_binary:
+
+; in:
+;   - rsi: file name to load
+; out:
+;   - cf: set if error
+;   - rdx: entry point of loaded binary
+
+    push rbx
+    push rcx
+
+    ; alloc 64k
+    mov rcx, 0x10000
+    mov rax, SYSCALL_MALLOC
+    int 0x80
+    test rax, rax
+    jz .error
+    
+    push rax ; save load ptr
+
+    ; read file into scratch
+    mov rdi, 0x80000
+    call fat16_read_file
+    jnc @f
+    add rsp, 8 ; drop saved load ptr
+    jmp .error
+
+    ; reloc elf binary from scratch (rax) into allocated memory (rbx)
+@@: pop rbx
+    mov rax, 0x80000
+    call elf64_load_file
+    jc .error
+
+    ; rdx = entry point
+    mov rdx, rax
+
+    pop rcx
+    pop rbx
+    clc
+    ret
+
+    .error:
+        pop rcx
+        pop rbx
+        stc
+        ret
+
+mkproc:
+
+; in:
+;   - rdx: user entry point
+; out:
+;   - rax: ptr to proc
+
+    push rcx
+    push rsi
+    push rdi
+    push r10
+
+    ; claim a free slot
+    lea r10, [procs.entries + PROC_SIZE]
+    mov r8d, 1 ; r8 = slot index
+@@: xor eax, eax ; expect dead slot
+    mov ecx, PROC_ALIVE ; claimed but not yet schedulable
+    lock cmpxchg [r10 + PROC_STATE], rcx ; atomic claim
+    je @f
+    add r10, PROC_SIZE
+    inc r8d
+    cmp r8d, PROCS_MAX
+    jb @b
+    jmp .none
+@@:
+
+    ; heap region for this slot
+    imul rax, r8, PROC_HEAP_SIZE
+    add rax, HEAP_BASE
+    mov [r10 + PROC_HEAP], rax
+    add rax, PROC_HEAP_SIZE
+    mov [r10 + PROC_HEAPEND], rax
+
+    ; private pml4: 4k-aligned copy of the kernel one
+    mov ecx, 0x2000
+    call malloc
+    test rax, rax
+    jz .error
+    add rax, 0xFFF
+    and rax, -0x1000
+    mov [r10 + PROC_CR3], rax
+    mov rdi, rax
+    mov rsi, pml4
+    mov ecx, 512
+    rep movsq
+
+    ; kernel stack (rsp0)
+    mov ecx, 0x4000
+    call malloc
+    test rax, rax
+    jz .error
+    add rax, 0x4000
+    mov [r10 + PROC_RSP0], rax
+
+    ; user stack
+    mov ecx, 0x4000
+    call malloc
+    test rax, rax
+    jz .error
+    add rax, 0x4000
+    mov rsi, rax
+
+    ; create fake stack frame for iretq to land in ring3
+    mov rdi, [r10 + PROC_RSP0]
+    mov qword [rdi - 8], 0x1B ; ss
+    mov [rdi - 16], rsi ; rsp
+    mov qword [rdi - 24], 0x202 ; rflags
+    mov qword [rdi - 32], 0x23 ; cs
+    mov [rdi - 40], rdx ; rip
+    mov qword [rdi - 48], 0 ; error code
+    mov qword [rdi - 56], 0x20 ; vector
+    mov rax, exception_handler.eoi
+    mov [rdi - 184], rax
+    lea rax, [rdi - 184]
+    mov [r10 + PROC_KRSP], rax
+
+    ; zero the saved gprs
+    lea rdi, [rdi - 176]
+    xor eax, eax
+    mov ecx, 15
+    rep stosq
+
+    mov qword [r10 + PROC_STATE], PROC_READY
+    mov rax, r10
+    jmp .done
+
+    .error:
+        mov qword [r10 + PROC_STATE], PROC_DEAD ; release claimed slot
+    .none:
+        xor eax, eax
+    .done:
+        pop r10
+        pop rdi
+        pop rsi
+        pop rcx
+        ret
 
 ;;;;;;;;;;;;;;;;;;;
 ;; EXECABLE DATA ;;
@@ -662,7 +737,6 @@ align 16
 procs:
     .current: dq -1 ; index of the last selected process
     .entries: rb (PROC_SIZE*PROCS_MAX)
-heap_top: dq 0x6400000
 lapic: dq 0
 
 scancodes:
