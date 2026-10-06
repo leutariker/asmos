@@ -3,6 +3,10 @@ include "include/crt0.inc"
 segment readable executable writable
 
 main:
+    ; print initial prompt once
+    lea rsi, [prompt]
+    call puts
+
     .loop:
         ; poll for keyboard input
         mov rax, 4 ; poll syscall
@@ -14,15 +18,69 @@ main:
         in al, 0x60
         call scan2ascii
 
+        ; submit command on Enter
+        cmp al, 13
+        je .submit
+
         test al, al
         jz .loop
-        
-        ; output char
-        out 0xE9, al
+
+        ; add char to buffer
+        mov rbx, [cmd_buf.ptr]
+        cmp rbx, 255
+        jae .loop
+        mov [cmd_buf + rbx], al
+        inc rbx
+        mov [cmd_buf.ptr], rbx
         
         jmp .loop
 
-    ret
+    .submit: 
+        ; terminate string
+        mov rbx, [cmd_buf.ptr]
+        mov byte [cmd_buf + rbx], 0
+
+        ; exec cmd
+        mov rsi, cmd_buf
+        mov rdi, cmd_buf.scratch
+        call file2fat83
+        mov rsi, cmd_buf.scratch
+        mov rax, 1 ; exec syscall
+        int 0x80 
+
+        ; print cmd
+        mov rbx, [cmd_buf.ptr]
+        mov rsi, cmd_buf
+        call puts
+        mov qword [cmd_buf.ptr], 0
+
+        ; newline
+        mov al, 0xD
+        out 0xE9, al
+        mov al, 0xA
+        out 0xE9, al
+
+        ; print prompt
+        lea rsi, [prompt]
+        call puts
+
+        jmp .loop
+
+@@: ret
+
+puts:
+
+; in:
+;   - rsi: ptr to string
+
+    mov rbx, rsi
+@@: mov al, [rbx]
+    test al, al
+    jz @f
+    out 0xE9, al
+    inc rbx
+    jmp @b
+@@: ret
 
 scan2ascii:
 
@@ -100,7 +158,70 @@ scan2ascii:
     .shift: db 0
     .extended: db 0
 
+file2fat83:
+
+; in:
+;   rsi = src
+;   rdi = out
+
+    mov r9, rdi ; keep start of output buffer
+
+    ; prefill 8.3 buffer with spaces
+    mov rcx, 11
+    mov al, ' '
+@@: mov [rdi], al
+    inc rdi
+    loop @b
+
+    mov rdi, r9 ; current write pointer
+    mov ecx, 8 ; chars left in basename
+    xor r8d, r8d ; 0=base, 1=ext
+
+    .next:
+        mov al, [rsi]
+        test al, al
+        jz .exit
+
+        cmp al, '.'
+        je .ext
+
+        ; lowercase to uppercase
+        cmp al, 'a'
+        jb @f
+        cmp al, 'z'
+        ja @f
+        sub al, 32
+    @@: test ecx, ecx
+        jz .step
+
+        ; write char if room remains in current part
+        mov [rdi], al
+        inc rdi
+        dec ecx
+        jmp .step
+
+    .ext:
+        cmp r8b, 1
+        je .step
+        mov r8b, 1
+        lea rdi, [r9 + 8]
+        mov ecx, 3
+
+    .step:
+        inc rsi
+        jmp .next
+
+    .exit:
+        ret
+
+segment readable writable
+cmd_buf:
+    times 256 db 0
+    .scratch: times 256 db 0
+    .ptr: dq 0
+
 segment readable
+prompt: db "> ", 0
 scancodes:
     db  0, 27, '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '=', 8, 9
     db 'q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p', '[', ']', 13, 0, 'a', 's'

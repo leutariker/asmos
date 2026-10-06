@@ -1,6 +1,6 @@
 OUT=boot.img
 SYS=stage1.out stage2.out stage3.out
-PROGS=apic.out bga.out cmd.out
+PROGS=apic.out bga.out cmd.out test.out
 INCLUDE=$(wildcard include/*.inc)
 
 all: boot.img
