@@ -7,7 +7,7 @@ main:
         ; poll for keyboard input
         mov rax, 4 ; poll syscall
         int 0x80
-        test al, 1 ; PROC_FLAG_KBD
+        test al, 1 ; PROCESS_FLAG_KEY
         jz .loop
 
         ; convert to ascii

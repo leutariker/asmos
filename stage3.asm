@@ -10,23 +10,23 @@ SYSCALL_MALLOC = 2
 SYSCALL_FREE = 3
 SYSCALL_POLL = 4
 
-PROC_CR3=0
-PROC_HEAP=PROC_CR3+8
-PROC_HEAPEND=PROC_HEAP+8
-PROC_KRSP=PROC_HEAPEND+8
-PROC_RSP0=PROC_KRSP+8
-PROC_STATE=PROC_RSP0+8
-PROC_FLAGS=PROC_STATE+8
+PROCESS_CR3=0
+PROCESS_HEAP=PROCESS_CR3+8
+PROCESS_HEAPEND=PROCESS_HEAP+8
+PROCESS_KRSP=PROCESS_HEAPEND+8
+PROCESS_RSP0=PROCESS_KRSP+8
+PROCESS_STATE=PROCESS_RSP0+8
+PROCESS_FLAGS=PROCESS_STATE+8
+PROCESS_SIZE=PROCESS_FLAGS+8
 
-PROC_SIZE=PROC_FLAGS+8
-PROC_HEAP_SIZE=0x800000
-PROCS_MAX=64
+PROCESS_HEAP_SIZE=0x800000
+PROCESSES_MAX=64
 
-PROC_DEAD=0
-PROC_ALIVE=1
-PROC_READY=2
+PROCESS_DEAD=0
+PROCESS_ALIVE=1
+PROCESS_READY=2
 
-PROC_FLAG_KBD=(1 shl 0)
+PROCESS_FLAG_KEY=(1 shl 0)
 
 ;;;;;;;;;;;;
 ;; MACROS ;;
@@ -161,14 +161,14 @@ start:
     mov qword [syscalls + (SYSCALL_FREE * 8)], free
     mov qword [syscalls + (SYSCALL_POLL * 8)], poll
 
-    ; register boot context as proc 0
-    mov qword [procs.current], 0
+    ; register boot context as process 0
+    mov qword [processes.current], 0
     mov rax, pml4
-    mov [procs.entries + PROC_CR3], rax
-    mov qword [procs.entries + PROC_HEAP], HEAP_BASE
-    mov qword [procs.entries + PROC_HEAPEND], HEAP_BASE + PROC_HEAP_SIZE
-    mov qword [procs.entries + PROC_RSP0], stack_top
-    mov qword [procs.entries + PROC_STATE], PROC_READY
+    mov [processes.entries + PROCESS_CR3], rax
+    mov qword [processes.entries + PROCESS_HEAP], HEAP_BASE
+    mov qword [processes.entries + PROCESS_HEAPEND], HEAP_BASE + PROCESS_HEAP_SIZE
+    mov qword [processes.entries + PROCESS_RSP0], stack_top
+    mov qword [processes.entries + PROCESS_STATE], PROCESS_READY
 
     ; load apic code into memory and init
     mov rsi, apic_out
@@ -202,7 +202,7 @@ start:
     mov rax, SYSCALL_RUN
     int 0x80
 
-    ; idle (proc 0)
+    ; idle (process 0)
 @@: hlt
     jmp @b
 
@@ -217,22 +217,22 @@ run:
 
     call load_binary
     jc @f
-    call mkproc
+    call new_process
 @@: ret
 
 exit:
 
 ; in:
-;   - r10: current proc
+;   - r10: current process
 
     cli
-    mov qword [r10 + PROC_STATE], PROC_DEAD
+    mov qword [r10 + PROCESS_STATE], PROCESS_DEAD
     jmp switch_task
 
 malloc:
 
 ; in:
-;   - r10: proc to alloc from
+;   - r10: process to alloc from
 ;   - rcx: bytes to alloc
 ; out:
 ;   - rax: 16-byte aligned ptr to alloced memory
@@ -240,16 +240,16 @@ malloc:
     test rcx, rcx
     jz @f
 
-    mov r8, [r10 + PROC_HEAP]
+    mov r8, [r10 + PROCESS_HEAP]
     add r8, 15
     and r8, -16 ; r8 = aligned start
     mov r9, r8
     add r9, rcx ; r9 = new heap top
     jc @f
-    cmp r9, [r10 + PROC_HEAPEND]
+    cmp r9, [r10 + PROCESS_HEAPEND]
     ja @f
 
-    mov [r10 + PROC_HEAP], r9
+    mov [r10 + PROCESS_HEAP], r9
     mov rax, r8
     ret
 
@@ -262,12 +262,12 @@ free:
 poll:
 
 ; in:
-;   - r10: current proc
+;   - r10: current process
 ; out:
 ;   - rax: pending flags, cleared on read
 
     xor eax, eax
-    xchg [r10 + PROC_FLAGS], rax
+    xchg [r10 + PROCESS_FLAGS], rax
     ret
 
 ;;;;;;;;;;;;;;
@@ -276,15 +276,15 @@ poll:
 
 keyboard_handler:
     ; scancode is left in the controller for userspace to read
-    lea rbx, [procs.entries]
-    mov ecx, PROCS_MAX
+    lea rbx, [processes.entries]
+    mov ecx, PROCESSES_MAX
 
-    ; set keyboard input recieved flag for all ready procs
-@@: cmp qword [rbx + PROC_STATE], PROC_READY
+    ; set keyboard input recieved flag for all ready processes
+@@: cmp qword [rbx + PROCESS_STATE], PROCESS_READY
     jne .skip
-    lock or qword [rbx + PROC_FLAGS], PROC_FLAG_KBD
+    lock or qword [rbx + PROCESS_FLAGS], PROCESS_FLAG_KEY
     .skip:
-        add rbx, PROC_SIZE
+        add rbx, PROCESS_SIZE
         dec ecx
         jnz @b
         
@@ -319,10 +319,10 @@ syscall_handler:
     mov rsi, [rsp + 32]
     mov rdi, [rsp + 40]
 
-    ; handlers get the caller's proc in r10
-    mov r10, [procs.current]
-    imul r10, r10, PROC_SIZE
-    add r10, procs.entries
+    ; handlers get the caller's process in r10
+    mov r10, [processes.current]
+    imul r10, r10, PROCESS_SIZE
+    add r10, processes.entries
     call r11
 
     mov [rsp + 0], rax
@@ -399,42 +399,42 @@ exception_handler:
 ;;;;;;;;;;;;;;;
 
 switch_task:
-    ; find next ready proc
-    mov r10, [procs.current]
-    imul r10, r10, PROC_SIZE
-    add r10, procs.entries
+    ; find next ready process
+    mov r10, [processes.current]
+    imul r10, r10, PROCESS_SIZE
+    add r10, processes.entries
     call schedule
     cmp rax, -1
     je @f
-    cmp rax, r10 ; same proc, nothing to do
+    cmp rax, r10 ; same process, nothing to do
     je @f
 
     ; switch task
-    mov [r10 + PROC_KRSP], rsp
-    mov rsp, [rax + PROC_KRSP]
-    mov rcx, [rax + PROC_CR3]
+    mov [r10 + PROCESS_KRSP], rsp
+    mov rsp, [rax + PROCESS_KRSP]
+    mov rcx, [rax + PROCESS_CR3]
     mov cr3, rcx
-    mov rcx, [rax + PROC_RSP0]
+    mov rcx, [rax + PROCESS_RSP0]
     mov [tss.rsp0], rcx
 @@: ret
 
 schedule:
 
 ; out:
-;   - rax: ptr to next ready proc
+;   - rax: ptr to next ready process
 
-    mov r8, [procs.current]
-    mov r9d, PROCS_MAX
+    mov r8, [processes.current]
+    mov r9d, PROCESSES_MAX
 
     .next:
         inc r8
-        cmp r8, PROCS_MAX
+        cmp r8, PROCESSES_MAX
         jb @f
         xor r8d, r8d ; wrap around
 
-@@:     imul rdx, r8, PROC_SIZE
-        lea rax, [procs.entries + rdx]
-        cmp qword [rax + PROC_STATE], PROC_READY
+@@:     imul rdx, r8, PROCESS_SIZE
+        lea rax, [processes.entries + rdx]
+        cmp qword [rax + PROCESS_STATE], PROCESS_READY
         je .found
         dec r9d
         jnz .next
@@ -443,7 +443,7 @@ schedule:
     ret
 
     .found:
-        mov [procs.current], r8
+        mov [processes.current], r8
         ret
 
 config_port:
@@ -509,12 +509,12 @@ load_binary:
         stc
         ret
 
-mkproc:
+new_process:
 
 ; in:
 ;   - rdx: user entry point
 ; out:
-;   - rax: ptr to proc
+;   - rax: ptr to process
 
     push rcx
     push rsi
@@ -522,26 +522,26 @@ mkproc:
     push r10
 
     ; claim a free slot
-    lea r10, [procs.entries + PROC_SIZE]
+    lea r10, [processes.entries + PROCESS_SIZE]
     mov r8d, 1 ; r8 = slot index
 @@: xor eax, eax ; expect dead slot
-    mov ecx, PROC_ALIVE ; claimed but not yet schedulable
-    lock cmpxchg [r10 + PROC_STATE], rcx ; atomic claim
+    mov ecx, PROCESS_ALIVE ; claimed but not yet schedulable
+    lock cmpxchg [r10 + PROCESS_STATE], rcx ; atomic claim
     je @f
-    add r10, PROC_SIZE
+    add r10, PROCESS_SIZE
     inc r8d
-    cmp r8d, PROCS_MAX
+    cmp r8d, PROCESSES_MAX
     jb @b
     jmp .none
 @@:
 
     ; heap region for this slot
-    imul rax, r8, PROC_HEAP_SIZE
+    imul rax, r8, PROCESS_HEAP_SIZE
     add rax, HEAP_BASE
-    mov [r10 + PROC_HEAP], rax
-    add rax, PROC_HEAP_SIZE
-    mov [r10 + PROC_HEAPEND], rax
-    mov qword [r10 + PROC_FLAGS], 0
+    mov [r10 + PROCESS_HEAP], rax
+    add rax, PROCESS_HEAP_SIZE
+    mov [r10 + PROCESS_HEAPEND], rax
+    mov qword [r10 + PROCESS_FLAGS], 0
 
     ; private pml4: 4k-aligned copy of the kernel one
     mov ecx, 0x2000
@@ -550,7 +550,7 @@ mkproc:
     jz .error
     add rax, 0xFFF
     and rax, -0x1000
-    mov [r10 + PROC_CR3], rax
+    mov [r10 + PROCESS_CR3], rax
     mov rdi, rax
     mov rsi, pml4
     mov ecx, 512
@@ -562,7 +562,7 @@ mkproc:
     test rax, rax
     jz .error
     add rax, 0x4000
-    mov [r10 + PROC_RSP0], rax
+    mov [r10 + PROCESS_RSP0], rax
 
     ; user stack
     mov ecx, 0x4000
@@ -573,7 +573,7 @@ mkproc:
     mov rsi, rax
 
     ; create fake stack frame for iretq to land in ring3
-    mov rdi, [r10 + PROC_RSP0]
+    mov rdi, [r10 + PROCESS_RSP0]
     mov qword [rdi - 8], 0x1B ; ss
     mov [rdi - 16], rsi ; rsp
     mov qword [rdi - 24], 0x202 ; rflags
@@ -584,7 +584,7 @@ mkproc:
     mov rax, exception_handler.eoi
     mov [rdi - 184], rax
     lea rax, [rdi - 184]
-    mov [r10 + PROC_KRSP], rax
+    mov [r10 + PROCESS_KRSP], rax
 
     ; zero the saved gprs
     lea rdi, [rdi - 176]
@@ -592,12 +592,12 @@ mkproc:
     mov ecx, 15
     rep stosq
 
-    mov qword [r10 + PROC_STATE], PROC_READY
+    mov qword [r10 + PROCESS_STATE], PROCESS_READY
     mov rax, r10
     jmp .done
 
     .error:
-        mov qword [r10 + PROC_STATE], PROC_DEAD ; release claimed slot
+        mov qword [r10 + PROCESS_STATE], PROCESS_DEAD ; release claimed slot
     .none:
         xor eax, eax
     .done:
@@ -724,9 +724,9 @@ gdtr:
 
 segment readable writable
 align 16
-procs:
-    .current: dq -1 ; index of the last selected process
-    .entries: rb (PROC_SIZE*PROCS_MAX)
+processes:
+    .current: dq -1
+    .entries: rb (PROCESS_SIZE*PROCESSES_MAX)
 lapic: dq 0
 
 align 16
