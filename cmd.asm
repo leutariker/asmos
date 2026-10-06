@@ -3,13 +3,25 @@ include "include/crt0.inc"
 segment readable executable writable
 
 main:
-    mov rax, 4 ; getc syscall
-    int 0x80
-    test al, al
-    jz main
-    call scan2ascii
-    out 0xE9, al
-    jmp main
+    .loop:
+        ; poll for keyboard input
+        mov rax, 4 ; poll syscall
+        int 0x80
+        test al, 1 ; PROC_FLAG_KBD
+        jz .loop
+
+        ; convert to ascii
+        in al, 0x60
+        call scan2ascii
+
+        test al, al
+        jz .loop
+        
+        ; output char
+        out 0xE9, al
+        
+        jmp .loop
+
     ret
 
 scan2ascii:

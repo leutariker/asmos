@@ -8,7 +8,7 @@ SYSCALL_EXIT = 0
 SYSCALL_RUN = 1
 SYSCALL_MALLOC = 2
 SYSCALL_FREE = 3
-SYSCALL_GETC = 4
+SYSCALL_POLL = 4
 
 PROC_CR3=0
 PROC_HEAP=PROC_CR3+8
@@ -16,14 +16,17 @@ PROC_HEAPEND=PROC_HEAP+8
 PROC_KRSP=PROC_HEAPEND+8
 PROC_RSP0=PROC_KRSP+8
 PROC_STATE=PROC_RSP0+8
+PROC_FLAGS=PROC_STATE+8
 
-PROC_SIZE=PROC_STATE+8
+PROC_SIZE=PROC_FLAGS+8
 PROC_HEAP_SIZE=0x800000
 PROCS_MAX=64
 
 PROC_DEAD=0
 PROC_ALIVE=1
 PROC_READY=2
+
+PROC_FLAG_KBD=(1 shl 0)
 
 ;;;;;;;;;;;;
 ;; MACROS ;;
@@ -156,7 +159,7 @@ start:
     mov qword [syscalls + (SYSCALL_RUN*8)], run
     mov qword [syscalls + (SYSCALL_MALLOC * 8)], malloc
     mov qword [syscalls + (SYSCALL_FREE * 8)], free
-    mov qword [syscalls + (SYSCALL_GETC * 8)], getc
+    mov qword [syscalls + (SYSCALL_POLL * 8)], poll
 
     ; register boot context as proc 0
     mov qword [procs.current], 0
@@ -189,6 +192,11 @@ start:
     mov esi, 1
     call config_port
 
+    ; let userspace read the keyboard controller
+    mov di, 0x60
+    mov esi, 1
+    call config_port
+
     ; run cmd
     mov rsi, cmd_out
     mov rax, SYSCALL_RUN
@@ -199,7 +207,7 @@ start:
     jmp @b
 
 ;;;;;;;;;;;;;;;;;;;;;;
-;; SYSTEM FUNCTIONS ;;
+;; SYSCALLS ;;
 ;;;;;;;;;;;;;;;;;;;;;;
 
 run:
@@ -251,54 +259,35 @@ malloc:
 free:
     ret
 
-getc:
+poll:
 
+; in:
+;   - r10: current proc
 ; out:
-;   - al: scancode
+;   - rax: pending flags, cleared on read
 
-    push rbx
-    push rsi
-
-    mov rbx, [scancodes.write_ptr]
-    mov rsi, [scancodes.read_ptr]
-    cmp rsi, rbx ; check if buffer is empty 
-    je .empty
-
-    mov al, [rsi]
-    inc rsi ; advance read pointer
-
-    ; wrap around
-    cmp rsi, scancodes.buf + 256
-    jb @f
-    mov rsi, scancodes.buf
-
-@@: mov [scancodes.read_ptr], rsi ; save read ptr
-    jmp .done
-
-    .empty:
-        xor al, al
-
-    .done:
-        pop rsi
-        pop rbx
-        ret
+    xor eax, eax
+    xchg [r10 + PROC_FLAGS], rax
+    ret
 
 ;;;;;;;;;;;;;;
 ;; HANDLERS ;;
 ;;;;;;;;;;;;;;
 
 keyboard_handler:
-    in al, 0x60
-    mov rbx, [scancodes.read_ptr]
-    mov [rbx], al
-    inc rbx
+    ; scancode is left in the controller for userspace to read
+    lea rbx, [procs.entries]
+    mov ecx, PROCS_MAX
 
-    ; wrap around write pointer
-    cmp rbx, scancodes.buf + 256
-    jb @f
-    mov rbx, scancodes.buf
-
-@@: mov [scancodes.write_ptr], rbx
+    ; set keyboard input recieved flag for all ready procs
+@@: cmp qword [rbx + PROC_STATE], PROC_READY
+    jne .skip
+    lock or qword [rbx + PROC_FLAGS], PROC_FLAG_KBD
+    .skip:
+        add rbx, PROC_SIZE
+        dec ecx
+        jnz @b
+        
     ret
 
 timer_handler:
@@ -552,6 +541,7 @@ mkproc:
     mov [r10 + PROC_HEAP], rax
     add rax, PROC_HEAP_SIZE
     mov [r10 + PROC_HEAPEND], rax
+    mov qword [r10 + PROC_FLAGS], 0
 
     ; private pml4: 4k-aligned copy of the kernel one
     mov ecx, 0x2000
@@ -738,11 +728,6 @@ procs:
     .current: dq -1 ; index of the last selected process
     .entries: rb (PROC_SIZE*PROCS_MAX)
 lapic: dq 0
-
-scancodes:
-    .buf: times 256 db 0
-    .read_ptr: dq scancodes.buf
-    .write_ptr: dq scancodes.buf
 
 align 16
 tss:
