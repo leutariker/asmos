@@ -253,6 +253,10 @@ start:
     mov esi, 1
     call config_port
 
+    mov di, 0x01D0
+    mov esi, 1
+    call config_port
+
     ; let userspace write to debug port
     mov di, 0xE9
     mov esi, 1
