@@ -389,12 +389,14 @@ read:
 
     ; read file into alloced memory
     call fat16_read_file
-    jc .error
+    jc .read_fail
 
     pop rax
     pop rcx
     ret
 
+    .read_fail:
+        add rsp, 8 ; drop saved ptr
     .error:
         pop rcx
         xor rax, rax
@@ -639,25 +641,25 @@ load_binary:
     push rbx
     push rcx
 
-    ; alloc 64k
+    ; alloc 64k for binary
     mov rcx, 0x10000
     mov rax, SYSCALL_MALLOC
     int 0x80
     test rax, rax
     jz .error
-    
-    push rax ; save load ptr
 
-    ; read file into scratch
-    mov rdi, 0x80000
-    call fat16_read_file
-    jnc @f
-    add rsp, 8 ; drop saved load ptr
+    push rax ; save ptr
+
+    ; read file
+    mov rax, SYSCALL_READ
+    int 0x80
+    test rax, rax
+    jnz @f
+    add rsp, 8 ; drop saved ptr
     jmp .error
 
     ; reloc elf binary from scratch (rax) into allocated memory (rbx)
 @@: pop rbx
-    mov rax, 0x80000
     call elf64_load_file
     jc .error
 
