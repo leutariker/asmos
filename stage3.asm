@@ -237,14 +237,6 @@ start:
     mov qword [processes.entries + PROCESS_RSP0], stack_top
     mov qword [processes.entries + PROCESS_STATE], PROCESS_READY
 
-    ; load bga code into memory and init
-    mov rsi, bga_out
-    call load_binary
-    mov rax, 1024
-    mov rbx, 768
-    mov rcx, 32
-    call rdx
-
     ; enable irqs
     mov edx, 0x1
     call config_irq
@@ -252,7 +244,16 @@ start:
     ; enable interrupts
     sti
 
-    ; allow 0xE9 for debug output in init
+    ; let userspace write to bga ports
+    mov di, 0x01CE
+    mov esi, 1
+    call config_port
+
+    mov di, 0x01CF
+    mov esi, 1
+    call config_port
+
+    ; let userspace write to debug port
     mov di, 0xE9
     mov esi, 1
     call config_port
@@ -261,6 +262,14 @@ start:
     mov di, 0x60
     mov esi, 1
     call config_port
+
+    ; run bga driver
+    mov rbx, 1024
+    mov rdx, 768
+    mov rcx, 32
+    mov rsi, bga_out
+    mov rax, SYSCALL_RUN
+    int 0x80
 
     ; run cmd
     mov rsi, cmd_out
@@ -279,11 +288,32 @@ run:
 
 ; in:
 ;   - rsi: file name of binary to run
+;   - rbx..r8: optional startup args for the new process
+
+    ; save startup args across load_binary
+    push r8
+    push rdi
+    push rsi
+    push rdx
+    push rcx
+    push rbx
 
     call load_binary
     jc @f
+
+    ; load_binary returns entry point in rdx, preserve it while restoring args
+    mov r11, rdx
+    mov rbx, [rsp + 0]
+    mov rcx, [rsp + 8]
+    mov r8, [rsp + 16]
+    mov rsi, [rsp + 24]
+    mov rdi, [rsp + 32]
+    mov r9, [rsp + 40]
+    mov rdx, r11
     call new_process
-@@: ret
+
+@@:add rsp, 48
+    ret
 
 exit:
 
@@ -645,13 +675,22 @@ new_process:
 
 ; in:
 ;   - rdx: user entry point
+;   - rbx: initial user rbx
+;   - rcx: initial user rcx
+;   - r8:  initial user rdx
+;   - rsi: initial user rsi
+;   - rdi: initial user rdi
+;   - r9:  initial user r8
 ; out:
 ;   - rax: ptr to process
 
+    push rbx
     push rcx
     push rsi
     push rdi
     push r10
+    push r8
+    push r9
 
     ; claim a free slot
     lea r10, [processes.entries + PROCESS_SIZE]
@@ -724,6 +763,21 @@ new_process:
     mov ecx, 15
     rep stosq
 
+    ; seed user registers 
+    mov rax, [r10 + PROCESS_RSP0]
+    mov r11, [rsp + 48] ; saved rbx
+    mov [rax - 168], r11 ; user rbx
+    mov r11, [rsp + 40] ; saved rcx
+    mov [rax - 160], r11 ; user rcx
+    mov r11, [rsp + 8] ; saved r8
+    mov [rax - 152], r11 ; user rdx
+    mov r11, [rsp + 32] ; saved rsi
+    mov [rax - 144], r11 ; user rsi
+    mov r11, [rsp + 24] ; saved rdi
+    mov [rax - 136], r11 ; user rdi
+    mov r11, [rsp + 0] ; saved r9
+    mov [rax - 120], r11 ; user r8
+
     mov qword [r10 + PROCESS_STATE], PROCESS_READY
     mov rax, r10
     jmp .done
@@ -733,10 +787,13 @@ new_process:
     .none:
         xor eax, eax
     .done:
+        pop r9
+        pop r8
         pop r10
         pop rdi
         pop rsi
         pop rcx
+        pop rbx
         ret
 
 ;;;;;;;;;;;;;;;;;;;

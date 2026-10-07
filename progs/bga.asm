@@ -30,20 +30,19 @@ BGA_BANK_SIZE_KB = 64
 BGA_BANK_ADDRESS = 0xA0000
 
 format elf64 executable 3 at 0x1000
-use64
-entry start
+include "include/crt0.inc"
 segment readable executable writable
 
-start:
+main:
 
 ; in:
-;   - rax: width
-;   - rbx: height
-;   - cx:  bpp
+;   - rbx: width
+;   - rdx: height
+;   - rcx:  bpp
 
     push rcx
+    push rdx
     push rbx
-    push rax
 
     ; check if bga is supported
     mov dx, BGA_IOPORT_INDEX
@@ -103,5 +102,7 @@ start:
 
     ret
 
-@@: add rsp, 24
+@@: pop rbx
+    pop rdx
+    pop rcx
     ret
