@@ -10,6 +10,7 @@ SYSCALL_MALLOC = 2
 SYSCALL_FREE = 3
 SYSCALL_POLL = 4
 SYSCALL_READ = 5
+SYSCALL_PORT = 6
 
 PROCESS_CR3=0
 PROCESS_HEAP=PROCESS_CR3+8
@@ -227,6 +228,7 @@ start:
     mov qword [syscalls + (SYSCALL_FREE * 8)], free
     mov qword [syscalls + (SYSCALL_POLL * 8)], poll
     mov qword [syscalls + (SYSCALL_READ * 8)], read
+    mov qword [syscalls + (SYSCALL_PORT * 8)], config_port
 
     ; register boot context as process 0
     mov qword [processes.current], 0
@@ -244,39 +246,12 @@ start:
     ; enable interrupts
     sti
 
-    ; let userspace write to bga ports
-    mov di, 0x01CE
-    mov esi, 1
+    mov rbx, 0xE9
+    mov rcx, 1
     call config_port
 
-    mov di, 0x01CF
-    mov esi, 1
-    call config_port
-
-    mov di, 0x01D0
-    mov esi, 1
-    call config_port
-
-    ; let userspace write to debug port
-    mov di, 0xE9
-    mov esi, 1
-    call config_port
-
-    ; let userspace read the keyboard controller
-    mov di, 0x60
-    mov esi, 1
-    call config_port
-
-    ; run bga driver
-    mov rbx, 1024
-    mov rdx, 768
-    mov rcx, 32
-    mov rsi, bga_out
-    mov rax, SYSCALL_RUN
-    int 0x80
-
-    ; run cmd
-    mov rsi, cmd_out
+    ; run init
+    mov rsi, init_out
     mov rax, SYSCALL_RUN
     int 0x80
 
@@ -305,8 +280,9 @@ run:
     call load_binary
     jc @f
 
-    ; load_binary returns entry point in rdx, preserve it while restoring args
-    mov r11, rdx
+    mov r11, rdx ; preserve entry point
+
+    ; restore args
     mov rbx, [rsp + 0]
     mov rcx, [rsp + 8]
     mov r8, [rsp + 16]
@@ -314,9 +290,11 @@ run:
     mov rdi, [rsp + 32]
     mov r9, [rsp + 40]
     mov rdx, r11
+
+    ; run
     call new_process
 
-@@:add rsp, 48
+@@: add rsp, 48
     ret
 
 exit:
@@ -358,6 +336,24 @@ malloc:
 free:
     ret
 
+config_port:
+
+; in:
+;   - rbx: port number
+;   - rcx: 0 = disable, 1 = enable
+
+    movzx eax, bx
+    test ecx, ecx
+    jz @f
+
+    btr [tss.io], eax ; allow
+    xor eax, eax
+    ret
+
+@@: bts [tss.io], eax ; deny
+    xor eax, eax
+    ret
+
 poll:
 
 ; in:
@@ -374,7 +370,8 @@ read:
 ; in:
 ;   - rsi: filename to read
 ; out:
-;   - out: ptr to read data (0 on error)
+;   - rax: ptr to read data (0 on error)
+;   - rbx: size of read data
 
     push rcx
 
@@ -391,6 +388,7 @@ read:
     call fat16_read_file
     jc .read_fail
 
+    mov rbx, rax ; file size
     pop rax
     pop rcx
     ret
@@ -577,23 +575,6 @@ schedule:
     .found:
         mov [processes.current], r8
         ret
-
-config_port:
-
-; in:
-;   - di: port number
-;   - esi: 0 = disable, 1 = enable
-
-    movzx eax, di
-    test esi, esi
-    jz @f
-
-    btr [tss.io], eax ; allow
-    ret
-
-@@: bts [tss.io], eax ; deny
-    ret
-
 
 config_irq:
 
@@ -842,6 +823,7 @@ segment readable
 apic_out: mk8.3 "APIC", "OUT"
 bga_out: mk8.3 "BGA", "OUT"
 cmd_out: mk8.3 "CMD", "OUT"
+init_out: mk8.3 "INIT", "OUT"
 
 align 4096
 pml4:

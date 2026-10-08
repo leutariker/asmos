@@ -44,6 +44,22 @@ main:
     push rdx
     push rbx
 
+    ; ask for permission to use bga ports
+    mov rax, 6
+    mov rbx, 0x01CE
+    mov rcx, 1
+    int 0x80
+
+    mov rax, 6
+    mov rbx, 0x01CF
+    mov rcx, 1
+    int 0x80
+
+    mov rax, 6
+    mov rbx, 0x01D0
+    mov rcx, 1
+    int 0x80
+
     ; check if bga is supported
     mov dx, BGA_IOPORT_INDEX
     mov ax, BGA_INDEX_ID
@@ -52,7 +68,7 @@ main:
     ; check bga version
     mov dx, BGA_IOPORT_DATA
     in ax, dx
-    cmp ax, BGA_ID4
+    cmp ax, BGA_ID2
     jb @f
 
     ; disable vbe extensions and lfb
