@@ -138,52 +138,61 @@ process_token:
         ret
 
 file2fat83:
-    ; fill filename with spaces
-    mov r9, rdi
+
+; in:
+;   rsi = src
+;   rdi = out
+
+    mov r9, rdi ; keep start of output buffer
+
+    ; prefill 8.3 buffer with spaces
     mov rcx, 11
     mov al, ' '
 @@: mov [rdi], al
     inc rdi
     loop @b
-    mov rdi, r9
-    mov ecx, 8
-    xor r8d, r8d
 
-    .char:
-        ; consume one char
+    mov rdi, r9 ; current write pointer
+    mov ecx, 8 ; chars left in basename
+    xor r8d, r8d ; 0=base, 1=ext
+
+    .next:
         mov al, [rsi]
         test al, al
         jz .exit
-        
-        ; copy base name up to the dot
-        inc rsi
+
         cmp al, '.'
-        je .extension
+        je .ext
+
+        ; lowercase to uppercase
         cmp al, 'a'
         jb @f
         cmp al, 'z'
         ja @f
-        sub al, 32 ; convert to uppercase
-
-        ; ignore excess chars
+        sub al, 32
     @@: test ecx, ecx
-        jz .char
+        jz .step
+
+        ; write char if room remains in current part
         mov [rdi], al
         inc rdi
         dec ecx
-        jmp .char
+        jmp .step
 
-    .extension:
-        ; only check first three chars of extension
-        test r8b, r8b
-        jnz .char
+    .ext:
+        cmp r8b, 1
+        je .step
         mov r8b, 1
         lea rdi, [r9 + 8]
         mov ecx, 3
-        jmp .char
+
+    .step:
+        inc rsi
+        jmp .next
 
     .exit:
         ret
+
 
 segment readable writable
 input_ptr: dq 0

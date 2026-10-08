@@ -9,6 +9,12 @@ main:
     mov rcx, 1
     int 0x80
 
+    ; ask permission to write to the debug port
+    mov rax, 6
+    mov rbx, 0xE9
+    mov rcx, 1
+    int 0x80
+
     ; print initial prompt once
     lea rsi, [prompt]
     call puts

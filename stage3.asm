@@ -246,10 +246,6 @@ start:
     ; enable interrupts
     sti
 
-    mov rbx, 0xE9
-    mov rcx, 1
-    call config_port
-
     ; run init
     mov rsi, init_out
     mov rax, SYSCALL_RUN
@@ -820,9 +816,6 @@ include "include/fat16.inc"
 ;;;;;;;;;;;;;;;;;;;
 
 segment readable
-apic_out: mk8.3 "APIC", "OUT"
-bga_out: mk8.3 "BGA", "OUT"
-cmd_out: mk8.3 "CMD", "OUT"
 init_out: mk8.3 "INIT", "OUT"
 
 align 4096
