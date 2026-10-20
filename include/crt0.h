@@ -3,6 +3,15 @@ typedef unsigned short uint16_t;
 typedef unsigned int uint32_t;
 typedef unsigned long long uint64_t;
 
+struct frame {
+    uint64_t rax;
+    uint64_t rbx;
+    uint64_t rcx;
+    uint64_t rdx;
+    uint64_t rsi;
+    uint64_t rdi;
+};
+
 enum {
     SYSCALL_EXIT = 0,
     SYSCALL_RUN = 1,
@@ -32,19 +41,30 @@ static inline void outb(uint16_t port, uint8_t val)
     );
 }
 
-static inline void syscall(uint64_t rax, uint64_t rbx, uint64_t rcx, uint64_t rdx, uint64_t rdi)
+static struct frame syscall(uint64_t rax, uint64_t rbx, uint64_t rcx, uint64_t rdx, uint64_t rsi, uint64_t rdi)
 {
+    struct frame out;
+
     register uint64_t in_rax __asm__("rax") = rax;
     register uint64_t in_rbx __asm__("rbx") = rbx;
     register uint64_t in_rcx __asm__("rcx") = rcx;
     register uint64_t in_rdx __asm__("rdx") = rdx;
+    register uint64_t in_rsi __asm__("rsi") = rsi;
     register uint64_t in_rdi __asm__("rdi") = rdi;
 
     __asm__ volatile (
         "int $0x80\n\t"
-        : "+a"(in_rax), "+b"(in_rbx), "+c"(in_rcx), "+d"(in_rdx), "+D"(in_rdi)
+        : "+a"(in_rax), "+b"(in_rbx), "+c"(in_rcx), "+d"(in_rdx), "+S"(in_rsi), "+D"(in_rdi)
         :: "memory"
     );
+
+    out.rax = in_rax;
+    out.rbx = in_rbx;
+    out.rcx = in_rcx;
+    out.rdx = in_rdx;
+    out.rsi = in_rsi;
+    out.rdi = in_rdi;
+    return out;
 }
 
 int main(void);
