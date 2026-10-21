@@ -13,7 +13,7 @@ static void file2fat83(const char* src, char out[11])
     u8 in_ext;
     char c;
 
-    for (i = 0; i < 11; ++i) {
+    for(i = 0; i < 11; ++i) {
         out[i] = ' ';
     }
 
@@ -21,26 +21,26 @@ static void file2fat83(const char* src, char out[11])
     ext_len = 0;
     in_ext = 0;
 
-    while (*src) {
+    while(*src) {
         c = *src++;
 
-        if (c == '.') {
-            if (in_ext == 0) {
+        if(c == '.') {
+            if(in_ext == 0) {
                 in_ext = 1;
             }
             continue;
         }
 
-        if (c >= 'a' && c <= 'z') {
+        if(c >= 'a' && c <= 'z') {
             c = (char)(c - ('a' - 'A'));
         }
 
-        if (in_ext == 0) {
-            if (base_len < 8) {
+        if(in_ext == 0) {
+            if(base_len < 8) {
                 out[base_len++] = c;
             }
         } else {
-            if (ext_len < 3) {
+            if(ext_len < 3) {
                 out[8 + ext_len++] = c;
             }
         }
@@ -54,7 +54,7 @@ static void consume(void)
     const char* p;
     char c;
 
-    if (toklen == 0) {
+    if(toklen == 0) {
         return;
     }
 
@@ -63,24 +63,28 @@ static void consume(void)
 
     // parse register names (rbx=, rcx=, rdx=, rdi=)
     idx = -1;
-    if (token[0] == 'R' && token[3] == '=') {
-        if (token[1] == 'B' && token[2] == 'X') idx = 0;
-        if (token[1] == 'C' && token[2] == 'X') idx = 1;
-        if (token[1] == 'D' && token[2] == 'X') idx = 2;
-        if (token[1] == 'D' && token[2] == 'I') idx = 3;
+    if(token[0] == 'R' && token[3] == '=') {
+        if(token[1] == 'B' && token[2] == 'X')
+            idx = 0;
+        if(token[1] == 'C' && token[2] == 'X')
+            idx = 1;
+        if(token[1] == 'D' && token[2] == 'X')
+            idx = 2;
+        if(token[1] == 'D' && token[2] == 'I')
+            idx = 3;
     }
 
     // parse decimals (e.g. rbx=1234)
-    if (idx >= 0) {
+    if(idx >= 0) {
         n = 0;
         p = token + 4;
-        while (1) {
+        while(1) {
             c = *p;
-            if (c == 0) {
+            if(c == 0) {
                 args[idx] = n;
                 return;
             }
-            if (c < '0' || c > '9') {
+            if(c < '0' || c > '9') {
                 return;
             }
             n = (n * 10u) + (u64)(c - '0');
@@ -96,17 +100,17 @@ static void parse(u8* input, u8* end)
 {
     u8 c;
 
-    while (input < end) {
+    while(input < end) {
         c = *input++;
 
         // whitespace
-        if (c == ' ' || c == 9 || c == 13) {
+        if(c == ' ' || c == 9 || c == 13) {
             consume();
             continue;
         }
 
         // newline
-        if (c == 10) {
+        if(c == 10) {
             consume();
             args[0] = 0;
             args[1] = 0;
@@ -115,7 +119,7 @@ static void parse(u8* input, u8* end)
             continue;
         }
 
-        if (toklen < 31) {
+        if(toklen < 31) {
             token[toklen] = (char)c;
             ++toklen;
         }
@@ -139,7 +143,7 @@ int main(u64 rax, u64 rbx, u64 rcx, u64 rdx, u64 rsi, u64 rdi)
     u8* end;
 
     frame = syscall(SYSCALL_READ_FILE, 0, 0, 0, (u64)init_txt, 0);
-    if (frame.rax == 0) {
+    if(frame.rax == 0) {
         return 0;
     }
 

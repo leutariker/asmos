@@ -22,6 +22,9 @@ run: $(OUT)
 debug: $(OUT)
 	qemu-system-x86_64 -m 768M -hda $(OUT) -no-reboot -debugcon stdio -d cpu_reset,int -D qemu.log
 
+format:
+	find . -type f \( -name "*.c" -o -name "*.h" \) -exec clang-format --style="file:./.clang-format" -i {} +
+
 clean:
 	rm -f $(SYS) $(PROGS) $(OUT)
 

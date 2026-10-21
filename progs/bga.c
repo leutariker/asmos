@@ -1,6 +1,7 @@
 #include "crt0.h"
 
-enum {
+enum
+{
     BGA_IOPORT_INDEX = 0x01CE,
     BGA_IOPORT_DATA = 0x01CF,
     BGA_INDEX_ID = 0,
@@ -28,7 +29,7 @@ int main(u64 rax, u64 rbx, u64 rcx, u64 rdx, u64 rsi, u64 rdi)
 
     // check bga version
     id = inw(BGA_IOPORT_DATA);
-    if (id < BGA_ID2) {
+    if(id < BGA_ID2) {
         return 0;
     }
 
