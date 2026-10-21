@@ -97,7 +97,7 @@ int main(u64 rax, u64 rbx, u64 rcx, u64 rdx, u64 rsi, u64 rdi)
     u8* input;
     u8* end;
 
-    frame = syscall(SYSCALL_READ_FILE, 0, 0, 0, (u64)"init.txt", 0);
+    frame = syscall(SYSCALL_READ_FILE, 0, 0, 0, (u64) "init.txt", 0);
     if(frame.rax == 0) {
         return 0;
     }

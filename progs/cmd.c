@@ -90,28 +90,28 @@ int main(u64 rax, u64 rbx, u64 rcx, u64 rdx, u64 rsi, u64 rdi)
             continue;
         }
         c = scan2ascii(inb(KEYBOARD_PORT));
-        
+
         switch(c) {
-            case 13:
-                // run file
-                cmd[cmd_len] = 0;
-                (void)syscall(SYSCALL_RUN, 0, 0, 0, (u64)cmd, 0);
+        case 13:
+            // run file
+            cmd[cmd_len] = 0;
+            (void)syscall(SYSCALL_RUN, 0, 0, 0, (u64)cmd, 0);
 
-                // write out cmd and reset buffer
-                puts(cmd);
-                cmd_len = 0;
-                puts("\r\n> ");
+            // write out cmd and reset buffer
+            puts(cmd);
+            cmd_len = 0;
+            puts("\r\n> ");
 
-                continue;
+            continue;
 
-            case 0:
-                continue;
+        case 0:
+            continue;
 
-            default:
-                if(cmd_len < CMD_BUFFER_SIZE - 1) {
-                    cmd[cmd_len++] = (char)c;
-                }
-                continue;
+        default:
+            if(cmd_len < CMD_BUFFER_SIZE - 1) {
+                cmd[cmd_len++] = (char)c;
+            }
+            continue;
         }
     }
 }

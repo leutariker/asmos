@@ -53,6 +53,14 @@ IOAPIC_REG_BASE = 0xFEC00000
 IOAPIC_REG_INDEX = IOAPIC_REG_BASE
 IOAPIC_REG_DATA = IOAPIC_REG_BASE + 0x10
 
+BPB = 0x7C00
+BPB_SECTORS_PER_CLUSTER = 13
+BPB_RESERVED_SECTORS = 14
+BPB_NUM_FATS = 16
+BPB_ROOT_ENTRIES = 17
+BPB_SECTORS_PER_FAT = 22
+FAT_SCRATCH = 0x7A00
+
 ;;;;;;;;;;;;
 ;; MACROS ;;
 ;;;;;;;;;;;;
@@ -96,8 +104,6 @@ macro popaq {
 ;;;;;;;;;;
 ;; MAIN ;;
 ;;;;;;;;;;
-
-IS_X64=1 ; for include/
 
 format elf64 executable 3 at 0x100000
 use32
@@ -848,6 +854,277 @@ file2fat83:
         mov rdi, r9
         ret
 
+ata_read:
+
+; in:
+;   - eax = lba
+;   - ecx = sector count
+;   - rdi = buffer
+    
+    push rax
+    push rbx
+    push rcx
+    push rdx
+    push rdi
+
+    mov ebx, eax
+
+    mov edx, 0x1F6
+    shr eax, 24
+    or al, 0xE0
+    out dx, al
+
+    mov edx, 0x1F2
+    mov al, cl
+    out dx, al
+
+    inc edx
+    mov al, bl
+    out dx, al
+
+    inc edx
+    mov al, bh
+    out dx, al
+
+    inc edx
+    shr ebx, 16
+    mov al, bl
+    out dx, al
+
+    add edx, 2
+    mov al, 0x20
+    out dx, al
+
+@@: in al, dx
+    and al, 0x88 ; BSY | DRQ
+    cmp al, 0x08
+    jne @b
+
+    push rcx
+    push rdx
+    mov ecx, 256
+    mov edx, 0x1F0
+    rep insw
+    pop rdx
+    pop rcx
+    loop @b
+
+    pop rdi
+    pop rdx
+    pop rcx
+    pop rbx
+    pop rax
+    ret
+
+fat16_read_file:
+
+; in:
+;   - rsi = 11-byte 8.3 name, rdi = buffer to read the file into
+; out:
+;   - rax = file size in bytes, cf set if the file was not found
+    
+    push rbx
+    push rcx
+    push rdx
+    push rsi
+    push rdi
+    push r8
+    push r9
+
+    mov r8, rdi
+
+    ; root_lba = reserved + fats * sectors_per_fat
+    movzx eax, byte [BPB + BPB_NUM_FATS]
+    movzx ecx, word [BPB + BPB_SECTORS_PER_FAT]
+    imul eax, ecx
+    movzx ecx, word [BPB + BPB_RESERVED_SECTORS]
+    add eax, ecx
+    mov ebx, eax
+
+    ; r9 = data_lba = root_lba + root directory size in sectors (16 entries per sector)
+    movzx edx, word [BPB + BPB_ROOT_ENTRIES]
+    lea r9d, [rdx + 15]
+    shr r9d, 4
+    add r9d, eax
+
+    .next_sector:
+        mov eax, ebx
+        mov edi, FAT_SCRATCH
+        mov ecx, 1
+        call ata_read
+        inc ebx
+
+    .next_entry:
+        cmp byte [rdi], 0
+        je .fail
+        cmp byte [rdi], 0xE5
+        je .skip
+
+        push rsi
+        push rdi
+        mov ecx, 11
+        repe cmpsb
+        pop rdi
+        pop rsi
+        je .found
+
+    .skip:
+        add rdi, 32
+        dec edx
+        jz .fail
+        test edi, 0x1FF
+        jnz .next_entry
+        jmp .next_sector
+
+    .found:
+        movzx ebx, word [rdi + 26] ; first cluster
+        mov esi, [rdi + 28] ; file size
+        mov rdi, r8
+        movzx edx, byte [BPB + BPB_SECTORS_PER_CLUSTER]
+
+    .cluster:
+        lea eax, [rbx - 2]
+        imul eax, edx
+        add eax, r9d
+        mov ecx, edx
+        call ata_read
+
+        mov eax, edx
+        shl eax, 9
+        add rdi, rax
+
+        ; fat16 entries are 2 bytes, so 256 per sector
+        mov eax, ebx
+        shr eax, 8
+        movzx ecx, word [BPB + BPB_RESERVED_SECTORS]
+        add eax, ecx
+        push rdi
+        mov edi, FAT_SCRATCH
+        mov ecx, 1
+        call ata_read
+        pop rdi
+
+        movzx ecx, bl
+        movzx ebx, word [FAT_SCRATCH + rcx * 2]
+        cmp ebx, 0xFFF8
+        jb .cluster
+
+        mov eax, esi
+        clc
+        jmp .exit
+
+    .fail:
+        stc
+
+    .exit:
+        pop r9
+        pop r8
+        pop rdi
+        pop rsi
+        pop rdx
+        pop rcx
+        pop rbx
+        ret
+
+elf64_load_file:
+
+; in:
+;   - rax = elf64 image, rbx = address to load at (0 = link address)
+; out:
+;   - rax = relocated entry point, cf set on error
+
+    push rbx
+    push rcx
+    push rdx
+    push rsi
+    push rdi
+    push r8
+    push r9
+    push r10
+
+    test rax, rax
+    jz .fail
+    mov r10, rax
+
+    cmp dword [r10], 0x464C457F
+    jne .fail
+    cmp byte [r10 + 4], 2 ; ELFCLASS64
+    jne .fail
+    cmp byte [r10 + 5], 1 ; little endian
+    jne .fail
+    cmp word [r10 + 16], 2 ; ET_EXEC
+    jne .fail
+    cmp word [r10 + 18], 62 ; EM_X86_64
+    jne .fail
+
+    movzx r9d, word [r10 + 54] ; e_phentsize
+    cmp r9d, 56
+    jb .fail
+    movzx edx, word [r10 + 56] ; e_phnum
+    mov r8, [r10 + 32] ; e_phoff
+    add r8, r10
+
+    ; the first PT_LOAD defines the link address
+    mov rdi, r8
+    mov ecx, edx
+@@: test ecx, ecx
+    jz .fail
+    cmp dword [rdi], 1 ; PT_LOAD
+    je @f
+    add rdi, r9
+    dec ecx
+    jmp @b
+
+@@: mov rax, [rdi + 16] ; p_vaddr
+    test rbx, rbx
+    jnz @f
+    mov rbx, rax
+@@: sub rbx, rax ; rbx = relocation delta
+
+    .next_phdr:
+        test edx, edx
+        jz .done
+        cmp dword [r8], 1 ; PT_LOAD
+        jne .skip
+
+        mov rcx, [r8 + 32] ; p_filesz
+        mov rax, [r8 + 40] ; p_memsz
+        sub rax, rcx
+        jb .fail
+        mov rsi, [r8 + 8] ; p_offset
+        add rsi, r10
+        mov rdi, [r8 + 16]
+        add rdi, rbx
+        rep movsb
+        mov rcx, rax
+        xor eax, eax
+        rep stosb
+
+    .skip:
+        add r8, r9
+        dec edx
+        jmp .next_phdr
+
+    .done:
+        mov rax, [r10 + 24] ; e_entry
+        add rax, rbx
+        clc
+        jmp .exit
+
+    .fail:
+        stc
+
+    .exit:
+        pop r10
+        pop r9
+        pop r8
+        pop rdi
+        pop rsi
+        pop rdx
+        pop rcx
+        pop rbx
+        ret
+
 ;;;;;;;;;;;;;;;;;;;
 ;; EXECABLE DATA ;;
 ;;;;;;;;;;;;;;;;;;;
@@ -876,9 +1153,6 @@ irqs: times 256 dq @f
 syscalls: times 256 dq @f
 @@: ret
 
-include "include/ata.inc"
-include "include/elf64.inc"
-include "include/fat16.inc"
 
 ;;;;;;;;;;;;;;;;;;;
 ;; READABLE DATA ;;

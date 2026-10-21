@@ -1,8 +1,7 @@
 OUT=boot.img
-SYS=stage1.out stage2.out stage3.out
+SYS=sys/stage1.out sys/stage2.out sys/stage3.out
 PROGS=progs/cmd.out progs/test.out progs/bga.out progs/init.out
-INCLUDE=$(wildcard include/*.inc)
-CFLAGS=-Iinclude -m64 -nostdlib -static
+CFLAGS=-Isys -m64 -nostdlib -static
 LDFLAGS=-Wl,-Ttext=0x1000 -Wl,-e,_start -Wl,-section-alignment=0x1000
 
 all: boot.img
@@ -10,10 +9,10 @@ all: boot.img
 $(OUT): mkboot.py $(SYS) $(PROGS) README.txt init.txt
 	python3 $^ $@
 
-%.out: %.c $(INCLUDE)
+%.out: %.c sys/crt0.h
 	tcc -o $@ $(CFLAGS) $(LDFLAGS) $<
 
-%.out: %.asm $(INCLUDE)
+%.out: %.asm
 	fasm $< $@
 
 run: $(OUT)
