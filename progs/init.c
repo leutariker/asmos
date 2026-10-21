@@ -3,49 +3,6 @@
 static u64 args[4];
 static u8 toklen;
 static char token[32];
-static char filename[11];
-
-static void file2fat83(const char* src, char out[11])
-{
-    u64 i;
-    u8 base_len;
-    u8 ext_len;
-    u8 in_ext;
-    char c;
-
-    for(i = 0; i < 11; ++i) {
-        out[i] = ' ';
-    }
-
-    base_len = 0;
-    ext_len = 0;
-    in_ext = 0;
-
-    while(*src) {
-        c = *src++;
-
-        if(c == '.') {
-            if(in_ext == 0) {
-                in_ext = 1;
-            }
-            continue;
-        }
-
-        if(c >= 'a' && c <= 'z') {
-            c = (char)(c - ('a' - 'A'));
-        }
-
-        if(in_ext == 0) {
-            if(base_len < 8) {
-                out[base_len++] = c;
-            }
-        } else {
-            if(ext_len < 3) {
-                out[8 + ext_len++] = c;
-            }
-        }
-    }
-}
 
 static void consume(void)
 {
@@ -92,8 +49,7 @@ static void consume(void)
         }
     }
 
-    file2fat83(token, filename);
-    (void)syscall(SYSCALL_RUN, args[0], args[1], args[2], (u64)filename, args[3]);
+    (void)syscall(SYSCALL_RUN, args[0], args[1], args[2], (u64)token, args[3]);
 }
 
 static void parse(u8* input, u8* end)
@@ -137,12 +93,11 @@ int main(u64 rax, u64 rbx, u64 rcx, u64 rdx, u64 rsi, u64 rdi)
     (void)rsi;
     (void)rdi;
 
-    char init_txt[11] = "INIT    TXT";
     struct frame frame;
     u8* input;
     u8* end;
 
-    frame = syscall(SYSCALL_READ_FILE, 0, 0, 0, (u64)init_txt, 0);
+    frame = syscall(SYSCALL_READ_FILE, 0, 0, 0, (u64)"init.txt", 0);
     if(frame.rax == 0) {
         return 0;
     }

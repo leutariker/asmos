@@ -371,6 +371,11 @@ read:
 
     push rcx
 
+    call file2fat83
+    test rdi, rdi
+    jz .error
+    mov rsi, rdi
+
     ; alloc 64k
     mov rcx, 0x10000
     mov rax, SYSCALL_MALLOC
@@ -779,6 +784,70 @@ new_process:
         pop rbx
         ret
 
+file2fat83:
+
+; in:
+;   - r10: current process
+;   - rsi: file name
+; out:
+;   - rdi: 11-byte 8.3 file name
+
+    mov ecx, 11
+    call malloc
+    mov rdi, rax
+    mov r9, rax ; keep start of output buffer (0 on failure)
+    test rax, rax
+    jz .exit
+
+    ; prefill 8.3 buffer with spaces
+    mov rcx, 11
+    mov al, ' '
+@@: mov [rdi], al
+    inc rdi
+    loop @b
+
+    mov rdi, r9 ; current write pointer
+    mov ecx, 8 ; chars left in basename
+    xor r8d, r8d ; 0=base, 1=ext
+
+    .next:
+        mov al, [rsi]
+        test al, al
+        jz .exit
+
+        cmp al, '.'
+        je .ext
+
+        ; lowercase to uppercase
+        cmp al, 'a'
+        jb @f
+        cmp al, 'z'
+        ja @f
+        sub al, 32
+    @@: test ecx, ecx
+        jz .step
+
+        ; write char if room remains in current part
+        mov [rdi], al
+        inc rdi
+        dec ecx
+        jmp .step
+
+    .ext:
+        cmp r8b, 1
+        je .step
+        mov r8b, 1
+        lea rdi, [r9 + 8]
+        mov ecx, 3
+
+    .step:
+        inc rsi
+        jmp .next
+
+    .exit:
+        mov rdi, r9
+        ret
+
 ;;;;;;;;;;;;;;;;;;;
 ;; EXECABLE DATA ;;
 ;;;;;;;;;;;;;;;;;;;
@@ -816,7 +885,7 @@ include "include/fat16.inc"
 ;;;;;;;;;;;;;;;;;;;
 
 segment readable
-init_out: mk8.3 "INIT", "OUT"
+init_out: db "init.out", 0
 
 align 4096
 pml4:
