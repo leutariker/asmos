@@ -1,6 +1,6 @@
 OUT=boot.img
 SYS=sys/stage1.out sys/stage2.out sys/stage3.out
-PROGS=progs/cmd.out progs/test.out progs/bga.out progs/init.out
+PROGS=progs/cmd.out progs/test.out progs/bga.out progs/ata.out progs/init.out
 CFLAGS=-Isys -m64 -nostdlib -static
 LDFLAGS=-Wl,-Ttext=0x1000 -Wl,-e,_start -Wl,-section-alignment=0x1000
 

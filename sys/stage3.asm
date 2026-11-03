@@ -11,6 +11,7 @@ SYSCALL_FREE = 3
 SYSCALL_POLL = 4
 SYSCALL_READ = 5
 SYSCALL_PORT = 6
+SYSCALL_READ_FILE = 7
 
 PROCESS_CR3=0
 PROCESS_HEAP=PROCESS_CR3+8
@@ -19,7 +20,8 @@ PROCESS_KRSP=PROCESS_HEAPEND+8
 PROCESS_RSP0=PROCESS_KRSP+8
 PROCESS_STATE=PROCESS_RSP0+8
 PROCESS_FLAGS=PROCESS_STATE+8
-PROCESS_SIZE=PROCESS_FLAGS+8
+PROCESS_ARGS=PROCESS_FLAGS+8 ; rbx, rcx, rdx, rsi, rdi
+PROCESS_SIZE=PROCESS_ARGS+40
 
 PROCESS_HEAP_SIZE=0x800000
 PROCESSES_MAX=64
@@ -29,6 +31,8 @@ PROCESS_ALIVE=1
 PROCESS_READY=2
 
 PROCESS_FLAG_KEY=(1 shl 0)
+PROCESS_FLAG_READ=(1 shl 1)
+PROCESS_FLAG_WRITE=(1 shl 2)
 
 PIC1 = 0x20
 PIC2 = 0xA0
@@ -235,6 +239,7 @@ start:
     mov qword [syscalls + (SYSCALL_POLL * 8)], poll
     mov qword [syscalls + (SYSCALL_READ * 8)], read
     mov qword [syscalls + (SYSCALL_PORT * 8)], config_port
+    mov qword [syscalls + (SYSCALL_READ_FILE * 8)], read_file
 
     ; register boot context as process 0
     mov qword [processes.current], 0
@@ -362,12 +367,33 @@ poll:
 ;   - r10: current process
 ; out:
 ;   - rax: pending flags, cleared on read
+;   - rbx, rcx, rdx, rsi, rdi: args stored by stash
 
+    mov rbx, [r10 + PROCESS_ARGS]
+    mov rcx, [r10 + PROCESS_ARGS + 8]
+    mov rdx, [r10 + PROCESS_ARGS + 16]
+    mov rsi, [r10 + PROCESS_ARGS + 24]
+    mov rdi, [r10 + PROCESS_ARGS + 32]
     xor eax, eax
     xchg [r10 + PROCESS_FLAGS], rax
     ret
 
 read:
+
+; in:
+;   - r10: current process
+;   - rbx: lba
+;   - rcx: count
+;   - rdx: buffer
+
+    call stash
+
+    mov eax, PROCESS_FLAG_READ
+    call broadcast
+
+    ret
+
+read_file:
 
 ; in:
 ;   - rsi: filename to read
@@ -412,19 +438,8 @@ read:
 ;;;;;;;;;;;;;;
 
 keyboard_handler:
-    ; scancode is left in the controller for userspace to read
-    lea rbx, [processes.entries]
-    mov ecx, PROCESSES_MAX
-
-    ; set keyboard input recieved flag for all ready processes
-@@: cmp qword [rbx + PROCESS_STATE], PROCESS_READY
-    jne .skip
-    lock or qword [rbx + PROCESS_FLAGS], PROCESS_FLAG_KEY
-    .skip:
-        add rbx, PROCESS_SIZE
-        dec ecx
-        jnz @b
-        
+    mov eax, PROCESS_FLAG_KEY
+    call broadcast
     ret
 
 timer_handler:
@@ -639,7 +654,7 @@ load_binary:
     push rax ; save ptr
 
     ; read file
-    mov rax, SYSCALL_READ
+    mov rax, SYSCALL_READ_FILE
     int 0x80
     test rax, rax
     jnz @f
@@ -1124,6 +1139,51 @@ elf64_load_file:
         pop rcx
         pop rbx
         ret
+
+broadcast:
+
+; in:
+;   - rax: flag to set
+
+    lea rbx, [processes.entries]
+    mov ecx, PROCESSES_MAX
+@@: cmp qword [rbx + PROCESS_STATE], PROCESS_READY
+    jne .skip
+    lock or qword [rbx + PROCESS_FLAGS], rax
+    .skip:
+        add rbx, PROCESS_SIZE
+        dec ecx
+        jnz @b
+
+    ret
+
+stash:
+
+; in:
+;   - r10: current process
+;   - rbx, rcx, rdx, rsi, rdi: args to be stashed
+
+    ; skip slot 0 (ring0)
+    lea r8, [processes.entries + PROCESS_SIZE]
+    mov r11d, PROCESSES_MAX - 1
+
+    .next:
+        cmp qword [r8 + PROCESS_STATE], PROCESS_READY
+        jne @f
+        cmp r8, r10
+        je @f
+
+        mov [r8 + PROCESS_ARGS], rbx
+        mov [r8 + PROCESS_ARGS + 8], rcx
+        mov [r8 + PROCESS_ARGS + 16], rdx
+        mov [r8 + PROCESS_ARGS + 24], rsi
+        mov [r8 + PROCESS_ARGS + 32], rdi
+
+@@:     add r8, PROCESS_SIZE
+        dec r11d
+        jnz .next
+
+    ret
 
 ;;;;;;;;;;;;;;;;;;;
 ;; EXECABLE DATA ;;
