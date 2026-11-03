@@ -1,3 +1,2 @@
 RBX=1024 RDX=768 RCX=32 bga.out
-ata.out
 cmd.out

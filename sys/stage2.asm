@@ -9,6 +9,8 @@ BPB_ROOT_ENTRIES = 17
 BPB_SECTORS_PER_FAT = 22
 SCRATCH = 0x7A00
 FILE_BUFFER = 0x10000
+ATA_IMAGE = 0x30000
+FAT_IMAGE = 0x40000
 
 use16
 start:
@@ -54,6 +56,16 @@ main:
     shr ecx, 4
     add eax, ecx
     mov [data_lba], eax
+
+    mov esi, ata
+    mov edi, ATA_IMAGE
+    call read_file
+    jc reboot
+
+    mov esi, fat
+    mov edi, FAT_IMAGE
+    call read_file
+    jc reboot
 
     mov esi, stage3
     mov edi, FILE_BUFFER
@@ -270,5 +282,7 @@ gdtr:
     dd gdt
 
 stage3 db "STAGE3  OUT"
+ata db "ATA     OUT"
+fat db "FAT     OUT"
 root_lba dd 0
 data_lba dd 0

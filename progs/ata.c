@@ -39,6 +39,7 @@ static int read_sector(u32 lba, u16* buf)
     for(i = 0; i < 256; ++i) {
         buf[i] = inw(ATA_DATA);
     }
+
     return 0;
 }
 
@@ -65,11 +66,16 @@ int main(u64 rax, u64 rbx, u64 rcx, u64 rdx, u64 rsi, u64 rdi)
             continue;
         }
 
-        // rbx = lba, rcx = count, rdx = buffer
+        // rbx = lba, rcx = count, rdi = buffer
         for(i = 0; i < frame.rcx; ++i) {
-            if(read_sector((u32)(frame.rbx + i), (u16*)frame.rdx + (i * 256)) < 0) {
+            if(read_sector((u32)(frame.rbx + i), (u16*)frame.rdi + (i * 256)) < 0) {
                 break;
             }
+        }
+
+        // completion flag
+        if(frame.rsi) {
+            *(volatile u64*)frame.rsi = 1;
         }
     }
 

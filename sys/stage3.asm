@@ -3,6 +3,8 @@
 ;;;;;;;;;;;;
 
 HEAP_BASE=0x6400000
+ATA_IMAGE=0x30000 ; preloaded by stage2
+FAT_IMAGE=0x40000 ; preloaded by stage2
 
 SYSCALL_EXIT = 0
 SYSCALL_RUN = 1
@@ -33,6 +35,7 @@ PROCESS_READY=2
 PROCESS_FLAG_KEY=(1 shl 0)
 PROCESS_FLAG_READ=(1 shl 1)
 PROCESS_FLAG_WRITE=(1 shl 2)
+PROCESS_FLAG_FILE=(1 shl 3)
 
 PIC1 = 0x20
 PIC2 = 0xA0
@@ -56,14 +59,6 @@ IOAPIC_REDTBL_BASE = 0x10
 IOAPIC_REG_BASE = 0xFEC00000
 IOAPIC_REG_INDEX = IOAPIC_REG_BASE
 IOAPIC_REG_DATA = IOAPIC_REG_BASE + 0x10
-
-BPB = 0x7C00
-BPB_SECTORS_PER_CLUSTER = 13
-BPB_RESERVED_SECTORS = 14
-BPB_NUM_FATS = 16
-BPB_ROOT_ENTRIES = 17
-BPB_SECTORS_PER_FAT = 22
-FAT_SCRATCH = 0x7A00
 
 ;;;;;;;;;;;;
 ;; MACROS ;;
@@ -257,18 +252,24 @@ start:
     ; enable interrupts
     sti
 
+    ; reloc preloaded drivers
+    mov rax, ATA_IMAGE
+    call reloc
+    mov rax, FAT_IMAGE
+    call reloc
+
     ; run init
     mov rsi, init_out
     mov rax, SYSCALL_RUN
     int 0x80
 
-    ; idle (process 0)
-@@: hlt
+    ; idle
+@@: int 0x20
     jmp @b
 
-;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;
 ;; SYSCALLS ;;
-;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;
 
 run:
 
@@ -369,7 +370,10 @@ poll:
 ;   - rax: pending flags, cleared on read
 ;   - rbx, rcx, rdx, rsi, rdi: args stored by stash
 
-    mov rbx, [r10 + PROCESS_ARGS]
+    cmp qword [r10 + PROCESS_FLAGS], 0
+    jne @f
+    int 0x20 ; nothing pending, give up the timeslice
+@@: mov rbx, [r10 + PROCESS_ARGS]
     mov rcx, [r10 + PROCESS_ARGS + 8]
     mov rdx, [r10 + PROCESS_ARGS + 16]
     mov rsi, [r10 + PROCESS_ARGS + 24]
@@ -384,29 +388,42 @@ read:
 ;   - r10: current process
 ;   - rbx: lba
 ;   - rcx: count
-;   - rdx: buffer
+;   - rdi: buffer
+
+    push rcx
+    push rsi
+    sub rsp, 16 ; [rsp] = completion flag
+    mov qword [rsp], 0
+    mov rsi, rsp
 
     call stash
 
     mov eax, PROCESS_FLAG_READ
     call broadcast
 
+@@: cmp qword [rsp], 0
+    jne @f
+    int 0x20 ; yield
+    jmp @b
+
+@@: add rsp, 16
+    pop rsi
+    pop rcx
     ret
 
 read_file:
 
 ; in:
+;   - r10: current process
 ;   - rsi: filename to read
 ; out:
 ;   - rax: ptr to read data (0 on error)
 ;   - rbx: size of read data
 
     push rcx
-
-    call file2fat83
-    test rdi, rdi
-    jz .error
-    mov rsi, rdi
+    push rdx
+    push rsi
+    push rdi
 
     ; alloc 64k
     mov rcx, 0x10000
@@ -414,23 +431,49 @@ read_file:
     int 0x80
     test rax, rax
     jz .error
+
+    ; [rsp] = status (0 pending, 1 ok, 2 error), [rsp + 8] = size, [rsp + 16] = buffer
+    sub rsp, 32
+    mov qword [rsp], 0
+    mov qword [rsp + 8], 0
+    mov [rsp + 16], rax
+
+    ; the fat driver gets rbx = name, rsi = status, rdi = buffer
+    mov rbx, rsi
     mov rdi, rax
-    push rax
+    mov rsi, rsp
+    xor ecx, ecx
+    xor edx, edx
+    call stash
 
-    ; read file into alloced memory
-    call fat16_read_file
-    jc .read_fail
+    mov eax, PROCESS_FLAG_FILE
+    call broadcast
 
-    mov rbx, rax ; file size
-    pop rax
+@@: cmp qword [rsp], 0
+    jne @f
+    int 0x20 ; yield
+    jmp @b
+
+@@: cmp qword [rsp], 1
+    jne .failed
+
+    mov rbx, [rsp + 8]
+    mov rax, [rsp + 16]
+    add rsp, 32
+    pop rdi
+    pop rsi
+    pop rdx
     pop rcx
     ret
 
-    .read_fail:
-        add rsp, 8 ; drop saved ptr
+    .failed:
+        add rsp, 32
     .error:
+        pop rdi
+        pop rsi
+        pop rdx
         pop rcx
-        xor rax, rax
+        xor eax, eax
         ret
 
 ;;;;;;;;;;;;;;
@@ -684,7 +727,7 @@ new_process:
 
 ; in:
 ;   - rdx: user entry point
-;   - rbx: initial user rbx
+;   - rbx..r: initial user rbx
 ;   - rcx: initial user rcx
 ;   - r8:  initial user rdx
 ;   - rsi: initial user rsi
@@ -805,241 +848,30 @@ new_process:
         pop rbx
         ret
 
-file2fat83:
+reloc:
 
 ; in:
-;   - r10: current process
-;   - rsi: file name
-; out:
-;   - rdi: 11-byte 8.3 file name
+;   - rax: preloaded elf64 image, relocated into process 0 heap
 
-    mov ecx, 11
-    call malloc
-    mov rdi, rax
-    mov r9, rax ; keep start of output buffer (0 on failure)
-    test rax, rax
-    jz .exit
-
-    ; prefill 8.3 buffer with spaces
-    mov rcx, 11
-    mov al, ' '
-@@: mov [rdi], al
-    inc rdi
-    loop @b
-
-    mov rdi, r9 ; current write pointer
-    mov ecx, 8 ; chars left in basename
-    xor r8d, r8d ; 0=base, 1=ext
-
-    .next:
-        mov al, [rsi]
-        test al, al
-        jz .exit
-
-        cmp al, '.'
-        je .ext
-
-        ; lowercase to uppercase
-        cmp al, 'a'
-        jb @f
-        cmp al, 'z'
-        ja @f
-        sub al, 32
-    @@: test ecx, ecx
-        jz .step
-
-        ; write char if room remains in current part
-        mov [rdi], al
-        inc rdi
-        dec ecx
-        jmp .step
-
-    .ext:
-        cmp r8b, 1
-        je .step
-        mov r8b, 1
-        lea rdi, [r9 + 8]
-        mov ecx, 3
-
-    .step:
-        inc rsi
-        jmp .next
-
-    .exit:
-        mov rdi, r9
-        ret
-
-ata_read:
-
-; in:
-;   - eax = lba
-;   - ecx = sector count
-;   - rdi = buffer
-    
+    mov rcx, 0x10000
     push rax
-    push rbx
-    push rcx
-    push rdx
-    push rdi
-
-    mov ebx, eax
-
-    mov edx, 0x1F6
-    shr eax, 24
-    or al, 0xE0
-    out dx, al
-
-    mov edx, 0x1F2
-    mov al, cl
-    out dx, al
-
-    inc edx
-    mov al, bl
-    out dx, al
-
-    inc edx
-    mov al, bh
-    out dx, al
-
-    inc edx
-    shr ebx, 16
-    mov al, bl
-    out dx, al
-
-    add edx, 2
-    mov al, 0x20
-    out dx, al
-
-@@: in al, dx
-    and al, 0x88 ; BSY | DRQ
-    cmp al, 0x08
-    jne @b
-
-    push rcx
-    push rdx
-    mov ecx, 256
-    mov edx, 0x1F0
-    rep insw
-    pop rdx
-    pop rcx
-    loop @b
-
-    pop rdi
-    pop rdx
-    pop rcx
-    pop rbx
+    mov rax, SYSCALL_MALLOC
+    int 0x80
+    mov rbx, rax
     pop rax
-    ret
-
-fat16_read_file:
-
-; in:
-;   - rsi = 11-byte 8.3 name, rdi = buffer to read the file into
-; out:
-;   - rax = file size in bytes, cf set if the file was not found
-    
-    push rbx
-    push rcx
-    push rdx
-    push rsi
-    push rdi
-    push r8
-    push r9
-
-    mov r8, rdi
-
-    ; root_lba = reserved + fats * sectors_per_fat
-    movzx eax, byte [BPB + BPB_NUM_FATS]
-    movzx ecx, word [BPB + BPB_SECTORS_PER_FAT]
-    imul eax, ecx
-    movzx ecx, word [BPB + BPB_RESERVED_SECTORS]
-    add eax, ecx
-    mov ebx, eax
-
-    ; r9 = data_lba = root_lba + root directory size in sectors (16 entries per sector)
-    movzx edx, word [BPB + BPB_ROOT_ENTRIES]
-    lea r9d, [rdx + 15]
-    shr r9d, 4
-    add r9d, eax
-
-    .next_sector:
-        mov eax, ebx
-        mov edi, FAT_SCRATCH
-        mov ecx, 1
-        call ata_read
-        inc ebx
-
-    .next_entry:
-        cmp byte [rdi], 0
-        je .fail
-        cmp byte [rdi], 0xE5
-        je .skip
-
-        push rsi
-        push rdi
-        mov ecx, 11
-        repe cmpsb
-        pop rdi
-        pop rsi
-        je .found
-
-    .skip:
-        add rdi, 32
-        dec edx
-        jz .fail
-        test edi, 0x1FF
-        jnz .next_entry
-        jmp .next_sector
-
-    .found:
-        movzx ebx, word [rdi + 26] ; first cluster
-        mov esi, [rdi + 28] ; file size
-        mov rdi, r8
-        movzx edx, byte [BPB + BPB_SECTORS_PER_CLUSTER]
-
-    .cluster:
-        lea eax, [rbx - 2]
-        imul eax, edx
-        add eax, r9d
-        mov ecx, edx
-        call ata_read
-
-        mov eax, edx
-        shl eax, 9
-        add rdi, rax
-
-        ; fat16 entries are 2 bytes, so 256 per sector
-        mov eax, ebx
-        shr eax, 8
-        movzx ecx, word [BPB + BPB_RESERVED_SECTORS]
-        add eax, ecx
-        push rdi
-        mov edi, FAT_SCRATCH
-        mov ecx, 1
-        call ata_read
-        pop rdi
-
-        movzx ecx, bl
-        movzx ebx, word [FAT_SCRATCH + rcx * 2]
-        cmp ebx, 0xFFF8
-        jb .cluster
-
-        mov eax, esi
-        clc
-        jmp .exit
-
-    .fail:
-        stc
-
-    .exit:
-        pop r9
-        pop r8
-        pop rdi
-        pop rsi
-        pop rdx
-        pop rcx
-        pop rbx
-        ret
+    test rbx, rbx
+    jz @f
+    call elf64_load_file
+    jc @f
+    mov rdx, rax
+    xor ebx, ebx
+    xor ecx, ecx
+    xor r8d, r8d
+    xor esi, esi
+    xor edi, edi
+    xor r9d, r9d
+    call new_process
+@@: ret
 
 elf64_load_file:
 

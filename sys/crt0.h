@@ -30,7 +30,7 @@ enum
     FLAG_KEY = 1 << 0,
     FLAG_READ = 1 << 1,
     FLAG_WRITE = 1 << 2,
-    FLAG_IO = 1 << 3,
+    FLAG_FILE = 1 << 3,
 };
 
 static inline u8 inb(u16 port)
@@ -56,8 +56,6 @@ static inline void outw(u16 port, u16 val)
 {
     __asm__ volatile("outw %0, %1" ::"a"(val), "Nd"(port));
 }
-
-
 
 static struct frame syscall(u64 rax, u64 rbx, u64 rcx, u64 rdx, u64 rsi, u64 rdi)
 {
