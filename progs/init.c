@@ -102,7 +102,7 @@ int main(u64 rax, u64 rbx, u64 rcx, u64 rdx, u64 rsi, u64 rdi)
         return 0;
     }
 
-    input = (const u8*)frame.rax;
+    input = (u8*)frame.rax;
     end = input + frame.rbx;
     args[0] = 0;
     args[1] = 0;

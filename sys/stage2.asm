@@ -59,23 +59,35 @@ main:
 
     mov esi, ata
     mov edi, ATA_IMAGE
-    call read_file
+    call load_file
     jc reboot
 
     mov esi, fat
     mov edi, FAT_IMAGE
-    call read_file
+    call load_file
     jc reboot
+
+    ; the elf driver is linked at its final address and loaded in place
+    mov esi, elf
+    mov edi, FILE_BUFFER
+    call load_file
+    jc reboot
+
+    mov eax, FILE_BUFFER
+    call load_elf
+    jc reboot
+    mov [elf_entry], eax
 
     mov esi, stage3
     mov edi, FILE_BUFFER
-    call read_file
+    call load_file
     jc reboot
 
     mov eax, FILE_BUFFER
     call load_elf
     jc reboot
 
+    mov ebx, [elf_entry]
     jmp eax
 
 reboot:
@@ -142,7 +154,7 @@ read_sectors:
     popad
     ret
 
-read_file:
+load_file:
 
 ; in:
 ;   - esi = 11-byte 8.3 name
@@ -284,5 +296,7 @@ gdtr:
 stage3 db "STAGE3  OUT"
 ata db "ATA     OUT"
 fat db "FAT     OUT"
+elf db "ELF     OUT"
+elf_entry dd 0
 root_lba dd 0
 data_lba dd 0

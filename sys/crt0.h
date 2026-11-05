@@ -13,6 +13,13 @@ struct frame
     u64 rdi;
 };
 
+struct resp
+{
+    u64 stat;
+    u64 ret;
+    u64 arg;
+};
+
 enum
 {
     SYSCALL_EXIT = 0,
@@ -20,9 +27,9 @@ enum
     SYSCALL_MALLOC = 2,
     SYSCALL_FREE = 3,
     SYSCALL_POLL = 4,
-    SYSCALL_READ = 5,
     SYSCALL_PORT = 6,
     SYSCALL_READ_FILE = 7,
+    SYSCALL_READ_SECTOR = 8,
 };
 
 enum
@@ -30,7 +37,9 @@ enum
     FLAG_KEY = 1 << 0,
     FLAG_READ = 1 << 1,
     FLAG_WRITE = 1 << 2,
-    FLAG_FILE = 1 << 3,
+    FLAG_RELOC = 1 << 3,
+    FLAG_READ_FILE = 1 << 4,
+    FLAG_READ_SECTOR = 1 << 5,
 };
 
 static inline u8 inb(u16 port)

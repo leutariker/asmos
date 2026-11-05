@@ -84,7 +84,7 @@ static long read_file(const u8* name, u8* buf)
     to83(name, name83);
 
     for(s = 0; s < root_sectors; ++s) {
-        (void)syscall(SYSCALL_READ, root_lba + s, 1, 0, 0, (u64)sector);
+        (void)syscall(SYSCALL_READ_SECTOR, root_lba + s, 1, 0, 0, (u64)sector);
 
         for(e = 0; e < bpb.bytes_per_sector / sizeof(*ent); ++e) {
             // end of directory
@@ -109,12 +109,13 @@ static long read_file(const u8* name, u8* buf)
 
             // follow cluster chain until eoc (0xFFF8)
             while(cluster >= 2 && cluster < 0xFFF8) {
-                (void)syscall(SYSCALL_READ, data_lba + (cluster - 2) * bpb.sectors_per_cluster,
+                (void)syscall(SYSCALL_READ_SECTOR,
+                              data_lba + (cluster - 2) * bpb.sectors_per_cluster,
                               bpb.sectors_per_cluster, 0, 0, (u64)buf);
                 buf += bpb.sectors_per_cluster * bpb.bytes_per_sector;
 
                 // fat16 entries are 2 bytes, so 256 per sector
-                (void)syscall(SYSCALL_READ, bpb.reserved_sectors + cluster / 256, 1, 0, 0,
+                (void)syscall(SYSCALL_READ_SECTOR, bpb.reserved_sectors + cluster / 256, 1, 0, 0,
                               (u64)sector);
                 cluster = ((const u16*)sector)[cluster % 256];
             }
@@ -129,7 +130,8 @@ static long read_file(const u8* name, u8* buf)
 int main(u64 rax, u64 rbx, u64 rcx, u64 rdx, u64 rsi, u64 rdi)
 {
     struct frame frame;
-    volatile u64* status;
+    volatile struct resp* resp;
+    u64 buf;
     long size;
 
     (void)rax;
@@ -141,19 +143,18 @@ int main(u64 rax, u64 rbx, u64 rcx, u64 rdx, u64 rsi, u64 rdi)
 
     for(;;) {
         frame = syscall(SYSCALL_POLL, 0, 0, 0, 0, 0);
-        if(!(frame.rax & FLAG_FILE)) {
-            continue;
-        }
 
-        // rbx = file name, rsi = status {state, size}, rdi = buffer
-        // status[0]: 1 = ok, 2 = error; set last since the kernel spins on it
-        status = (volatile u64*)frame.rsi;
-        size = read_file((const u8*)frame.rbx, (u8*)frame.rdi);
-        if(size < 0) {
-            status[0] = 2;
-        } else {
-            status[1] = (u64)size;
-            status[0] = 1;
+        if(frame.rax & FLAG_READ_FILE) {
+            resp = (volatile struct resp*)frame.rsi;
+            buf = syscall(SYSCALL_MALLOC, 0, 0x10000, 0, 0, 0).rax;
+            size = buf ? read_file((const u8*)frame.rbx, (u8*)buf) : -1;
+            if(size < 0) {
+                resp->stat = 2;
+            } else {
+                resp->ret = (u64)size;
+                resp->arg = buf;
+                resp->stat = 1;
+            }
         }
     }
 

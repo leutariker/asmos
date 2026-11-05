@@ -1,6 +1,6 @@
 OUT=boot.img
 SYS=sys/stage1.out sys/stage2.out sys/stage3.out
-PROGS=progs/cmd.out progs/test.out progs/bga.out progs/ata.out progs/fat.out progs/init.out
+PROGS=progs/cmd.out progs/test.out progs/bga.out progs/ata.out progs/fat.out progs/elf.out progs/init.out
 CFLAGS=-Isys -m64 -nostdlib -static
 LDFLAGS=-Wl,-Ttext=0x1000 -Wl,-e,_start -Wl,-section-alignment=0x1000
 
@@ -8,6 +8,8 @@ all: boot.img
 
 $(OUT): mkboot.py $(SYS) $(PROGS) README.txt init.txt
 	python3 $^ $@
+
+progs/elf.out: LDFLAGS=-Wl,-Ttext=0x50000 -Wl,-e,_start -Wl,-section-alignment=0x1000
 
 %.out: %.c sys/crt0.h
 	tcc -o $@ $(CFLAGS) $(LDFLAGS) $<

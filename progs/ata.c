@@ -45,6 +45,7 @@ static int read_sector(u32 lba, u16* buf)
 
 int main(u64 rax, u64 rbx, u64 rcx, u64 rdx, u64 rsi, u64 rdi)
 {
+    volatile struct resp* resp;
     struct frame frame;
     u64 i;
     u16 port;
@@ -62,20 +63,22 @@ int main(u64 rax, u64 rbx, u64 rcx, u64 rdx, u64 rsi, u64 rdi)
 
     for(;;) {
         frame = syscall(SYSCALL_POLL, 0, 0, 0, 0, 0);
-        if(!(frame.rax & FLAG_READ)) {
-            continue;
-        }
 
-        // rbx = lba, rcx = count, rdi = buffer
-        for(i = 0; i < frame.rcx; ++i) {
-            if(read_sector((u32)(frame.rbx + i), (u16*)frame.rdi + (i * 256)) < 0) {
-                break;
+        if(frame.rax & FLAG_READ_SECTOR) {
+            // rbx = lba to read
+            // rcx = # of sectors to read
+            // rdi = buffer to read into
+
+            for(i = 0; i < frame.rcx; ++i) {
+                if(read_sector((u32)(frame.rbx + i), (u16*)frame.rdi + (i * 256)) < 0) {
+                    break;
+                }
             }
-        }
 
-        // completion flag
-        if(frame.rsi) {
-            *(volatile u64*)frame.rsi = 1;
+            if(frame.rsi) {
+                resp = (volatile struct resp*)frame.rsi;
+                resp->stat = 1;
+            }
         }
     }
 

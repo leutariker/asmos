@@ -3,17 +3,18 @@
 ;;;;;;;;;;;;
 
 HEAP_BASE=0x6400000
-ATA_IMAGE=0x30000 ; preloaded by stage2
-FAT_IMAGE=0x40000 ; preloaded by stage2
+ATA_IMAGE=0x30000 ; preload_fileed by stage2
+FAT_IMAGE=0x40000 ; preload_fileed by stage2
 
 SYSCALL_EXIT = 0
 SYSCALL_RUN = 1
 SYSCALL_MALLOC = 2
 SYSCALL_FREE = 3
 SYSCALL_POLL = 4
-SYSCALL_READ = 5
+SYSCALL_RELOC = 5
 SYSCALL_PORT = 6
 SYSCALL_READ_FILE = 7
+SYSCALL_READ_SECTOR = 8
 
 PROCESS_CR3=0
 PROCESS_HEAP=PROCESS_CR3+8
@@ -33,9 +34,10 @@ PROCESS_ALIVE=1
 PROCESS_READY=2
 
 PROCESS_FLAG_KEY=(1 shl 0)
-PROCESS_FLAG_READ=(1 shl 1)
 PROCESS_FLAG_WRITE=(1 shl 2)
-PROCESS_FLAG_FILE=(1 shl 3)
+PROCESS_FLAG_RELOC=(1 shl 3)
+PROCESS_FLAG_READ_FILE=(1 shl 4)
+PROCESS_FLAG_READ_SECTOR=(1 shl 5)
 
 PIC1 = 0x20
 PIC2 = 0xA0
@@ -113,6 +115,9 @@ start:
     cli
     cld
 
+    ; stage2 passes the preload_fileed elf driver's entry point in ebx
+    mov [.elf_driver], ebx
+
     ; check for cpu features
     mov eax, 0x80000001
     cpuid
@@ -121,7 +126,7 @@ start:
     bt edx, 5
     jnc $ ; halt if no msr
 
-    ; load new gdt
+    ; load_file new gdt
     lgdt [gdtr]
 
     ; enable pae
@@ -129,7 +134,7 @@ start:
     or eax, (1 shl 5)
     mov cr4, eax
 
-    ; load pml4
+    ; load_file pml4
     mov eax, pml4
     mov cr3, eax
 
@@ -144,7 +149,7 @@ start:
     or eax, (1 shl 31)
     mov cr0, eax
 
-    ; load gdt
+    ; load_file gdt
     jmp far 0x10:@f
 
     use64
@@ -173,11 +178,11 @@ start:
     shr rax, 8
     mov [gdt_tss.base_upper], eax
 
-    ; load tss
+    ; load_file tss
     mov ax, 0x28
     ltr ax
 
-    ; load idt
+    ; load_file idt
     lidt [idtr]
 
     ; disable the 8259 pic
@@ -232,9 +237,10 @@ start:
     mov qword [syscalls + (SYSCALL_MALLOC * 8)], malloc
     mov qword [syscalls + (SYSCALL_FREE * 8)], free
     mov qword [syscalls + (SYSCALL_POLL * 8)], poll
-    mov qword [syscalls + (SYSCALL_READ * 8)], read
     mov qword [syscalls + (SYSCALL_PORT * 8)], config_port
     mov qword [syscalls + (SYSCALL_READ_FILE * 8)], read_file
+    mov qword [syscalls + (SYSCALL_READ_SECTOR * 8)], read_sector
+    mov qword [syscalls + (SYSCALL_RELOC * 8)], reloc
 
     ; register boot context as process 0
     mov qword [processes.current], 0
@@ -252,11 +258,21 @@ start:
     ; enable interrupts
     sti
 
-    ; reloc preloaded drivers
+    ; start the elf driver
+    mov edx, [.elf_driver]
+    xor ebx, ebx
+    xor ecx, ecx
+    xor r8d, r8d
+    xor esi, esi
+    xor edi, edi
+    xor r9d, r9d
+    call new_process
+
+    ; reloc ata and fat code
     mov rax, ATA_IMAGE
-    call reloc
+    call postload
     mov rax, FAT_IMAGE
-    call reloc
+    call postload
 
     ; run init
     mov rsi, init_out
@@ -266,6 +282,8 @@ start:
     ; idle
 @@: int 0x20
     jmp @b
+
+    .elf_driver: dd 0
 
 ;;;;;;;;;;;;;;
 ;; SYSCALLS ;;
@@ -277,7 +295,7 @@ run:
 ;   - rsi: file name of binary to run
 ;   - rbx..r8: optional startup args for the new process
 
-    ; save startup args across load_binary
+    ; save startup args
     push r8
     push rdi
     push rsi
@@ -382,7 +400,7 @@ poll:
     xchg [r10 + PROCESS_FLAGS], rax
     ret
 
-read:
+read_sector:
 
 ; in:
 ;   - r10: current process
@@ -398,7 +416,7 @@ read:
 
     call stash
 
-    mov eax, PROCESS_FLAG_READ
+    mov eax, PROCESS_FLAG_READ_SECTOR
     call broadcast
 
 @@: cmp qword [rsp], 0
@@ -425,28 +443,21 @@ read_file:
     push rsi
     push rdi
 
-    ; alloc 64k
-    mov rcx, 0x10000
-    mov rax, SYSCALL_MALLOC
-    int 0x80
-    test rax, rax
-    jz .error
-
-    ; [rsp] = status (0 pending, 1 ok, 2 error), [rsp + 8] = size, [rsp + 16] = buffer
+    ; create resp struct
     sub rsp, 32
     mov qword [rsp], 0
     mov qword [rsp + 8], 0
-    mov [rsp + 16], rax
+    mov qword [rsp + 16], 0
 
-    ; the fat driver gets rbx = name, rsi = status, rdi = buffer
+    ; rbx = name, rsi = status
     mov rbx, rsi
-    mov rdi, rax
+    xor edi, edi
     mov rsi, rsp
     xor ecx, ecx
     xor edx, edx
     call stash
 
-    mov eax, PROCESS_FLAG_FILE
+    mov eax, PROCESS_FLAG_READ_FILE
     call broadcast
 
 @@: cmp qword [rsp], 0
@@ -475,6 +486,50 @@ read_file:
         pop rcx
         xor eax, eax
         ret
+
+reloc:
+
+; in:
+;   - r10: current process
+;   - rbx: elf64 image
+;   - rdi: address to load_file at
+; out:
+;   - rax: relocated entry point (0 on error)
+
+    push rcx
+    push rdx
+    push rsi
+    push rdi
+
+    ; create resp struct
+    sub rsp, 16
+    mov qword [rsp], 0
+    mov qword [rsp + 8], 0
+
+    ; the elf driver gets rbx = image, rsi = status, rdi = load_file address
+    mov rsi, rsp
+    xor ecx, ecx
+    xor edx, edx
+    call stash
+
+    mov eax, PROCESS_FLAG_RELOC
+    call broadcast
+
+@@: cmp qword [rsp], 0
+    jne @f
+    int 0x20 ; yield
+    jmp @b
+
+@@: xor eax, eax
+    cmp qword [rsp], 1
+    jne @f
+    mov rax, [rsp + 8]
+@@: add rsp, 16
+    pop rdi
+    pop rsi
+    pop rdx
+    pop rcx
+    ret
 
 ;;;;;;;;;;;;;;
 ;; HANDLERS ;;
@@ -507,7 +562,7 @@ syscall_handler:
     test r11, r11
     jz .restore
 
-    ; load args from the saved frame
+    ; load_file args from the saved frame
     mov rbx, [rsp + 8]
     mov rcx, [rsp + 16]
     mov rdx, [rsp + 24]
@@ -679,10 +734,9 @@ config_irq:
 load_binary:
 
 ; in:
-;   - rsi: file name to load
+;   - rsi: file name
 ; out:
-;   - cf: set if error
-;   - rdx: entry point of loaded binary
+;   - rdx: entry point of binary
 
     push rbx
     push rcx
@@ -704,10 +758,13 @@ load_binary:
     add rsp, 8 ; drop saved ptr
     jmp .error
 
-    ; reloc elf binary from scratch (rax) into allocated memory (rbx)
-@@: pop rbx
-    call elf64_load_file
-    jc .error
+    ; reloc elf binary from scratch (rbx) into allocated memory (rdi) via the elf driver
+@@: mov rbx, rax
+    pop rdi
+    mov rax, SYSCALL_RELOC
+    int 0x80
+    test rax, rax
+    jz .error
 
     ; rdx = entry point
     mov rdx, rax
@@ -848,21 +905,23 @@ new_process:
         pop rbx
         ret
 
-reloc:
+postload:
 
 ; in:
-;   - rax: preloaded elf64 image, relocated into process 0 heap
+;   - rax: elf64 image
 
     mov rcx, 0x10000
     push rax
     mov rax, SYSCALL_MALLOC
     int 0x80
-    mov rbx, rax
-    pop rax
-    test rbx, rbx
+    mov rdi, rax
+    pop rbx
+    test rdi, rdi
     jz @f
-    call elf64_load_file
-    jc @f
+    mov rax, SYSCALL_RELOC
+    int 0x80
+    test rax, rax
+    jz @f
     mov rdx, rax
     xor ebx, ebx
     xor ecx, ecx
@@ -872,105 +931,6 @@ reloc:
     xor r9d, r9d
     call new_process
 @@: ret
-
-elf64_load_file:
-
-; in:
-;   - rax = elf64 image, rbx = address to load at (0 = link address)
-; out:
-;   - rax = relocated entry point, cf set on error
-
-    push rbx
-    push rcx
-    push rdx
-    push rsi
-    push rdi
-    push r8
-    push r9
-    push r10
-
-    test rax, rax
-    jz .fail
-    mov r10, rax
-
-    cmp dword [r10], 0x464C457F
-    jne .fail
-    cmp byte [r10 + 4], 2 ; ELFCLASS64
-    jne .fail
-    cmp byte [r10 + 5], 1 ; little endian
-    jne .fail
-    cmp word [r10 + 16], 2 ; ET_EXEC
-    jne .fail
-    cmp word [r10 + 18], 62 ; EM_X86_64
-    jne .fail
-
-    movzx r9d, word [r10 + 54] ; e_phentsize
-    cmp r9d, 56
-    jb .fail
-    movzx edx, word [r10 + 56] ; e_phnum
-    mov r8, [r10 + 32] ; e_phoff
-    add r8, r10
-
-    ; the first PT_LOAD defines the link address
-    mov rdi, r8
-    mov ecx, edx
-@@: test ecx, ecx
-    jz .fail
-    cmp dword [rdi], 1 ; PT_LOAD
-    je @f
-    add rdi, r9
-    dec ecx
-    jmp @b
-
-@@: mov rax, [rdi + 16] ; p_vaddr
-    test rbx, rbx
-    jnz @f
-    mov rbx, rax
-@@: sub rbx, rax ; rbx = relocation delta
-
-    .next_phdr:
-        test edx, edx
-        jz .done
-        cmp dword [r8], 1 ; PT_LOAD
-        jne .skip
-
-        mov rcx, [r8 + 32] ; p_filesz
-        mov rax, [r8 + 40] ; p_memsz
-        sub rax, rcx
-        jb .fail
-        mov rsi, [r8 + 8] ; p_offset
-        add rsi, r10
-        mov rdi, [r8 + 16]
-        add rdi, rbx
-        rep movsb
-        mov rcx, rax
-        xor eax, eax
-        rep stosb
-
-    .skip:
-        add r8, r9
-        dec edx
-        jmp .next_phdr
-
-    .done:
-        mov rax, [r10 + 24] ; e_entry
-        add rax, rbx
-        clc
-        jmp .exit
-
-    .fail:
-        stc
-
-    .exit:
-        pop r10
-        pop r9
-        pop r8
-        pop rdi
-        pop rsi
-        pop rdx
-        pop rcx
-        pop rbx
-        ret
 
 broadcast:
 
